@@ -1,0 +1,59 @@
+.force-hide-container {
+    margin: 0;
+    box-shadow: none;
+    --block-border-width: 0;
+    background: transparent;
+    padding: 0;
+    overflow: visible;
+}
+
+.svelte-sfqy0y {
+    display: flex;
+    flex-direction: inherit;
+    flex-wrap: wrap;
+    gap: 0;
+    box-shadow: none;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    overflow-y: hidden;
+}
+
+.custom-spacing {
+    padding: 10px;
+    gap: 20px;
+    flex-grow: 0 !important;
+}
+
+.unequal-height {
+    align-items: flex-end;
+}
+
+.tool{
+    max-width: 40px;
+    min-width: 40px !important;
+}
+
+/* Center the component and allow it to use the full row width */
+.vh-img {
+  display: grid;
+  justify-items: center;
+}
+
+/* Container should size to the image, but never exceed the row width */
+.vh-img .image-container {
+  inline-size: fit-content !important;   /* prefers image’s natural width */
+  max-inline-size: 100% !important;      /* ...but clamps to available width */
+  margin-inline: auto;
+  overflow: hidden;                       /* avoid odd overflow on iOS */
+}
+
+/* Image scales by BOTH constraints: height cap and row width */
+.vh-img .image-container img {
+  max-block-size: 700px !important;      /* fixed max height cap */
+  max-inline-size: 100%;                  /* never wider than container */
+  inline-size: auto;                      /* keep aspect ratio */
+  block-size: auto;
+  object-fit: contain;
+  display: block;
+}

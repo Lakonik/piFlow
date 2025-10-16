@@ -1,0 +1,24 @@
+data = dict(
+    train=dict(
+        type='ImagePrompt',
+        data_root='data/t2i_prompts_3m',
+        cache_dir='preproc_flux',
+        cache_datalist_path='data/t2i_prompts_3m/preproc_flux.jsonl.gz',
+        prompt_dataset_kwargs=dict(
+            path='Lakonik/t2i-prompts-3m',
+            split='train'),
+        bucketize=True,
+        end_ind=-128),
+    val=dict(
+        type='ImagePrompt',
+        data_root='data/t2i_prompts_3m',
+        cache_dir='preproc_flux',
+        cache_datalist_path='data/t2i_prompts_3m/preproc_flux.jsonl.gz',
+        prompt_dataset_kwargs=dict(
+            path='Lakonik/t2i-prompts-3m',
+            split='train'),
+        start_ind=-128,
+        repeat=2,
+        test_mode=True,
+    ),
+)

@@ -1,0 +1,76 @@
+/* ---------- layout / thumbnails ---------- */
+body{
+  margin:0;
+  font-family:Arial,Helvetica,sans-serif;
+  padding:1rem;
+}
+
+/* will be “auto-fill” by default or 2-col when forced */
+.grid{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(320px,1fr));
+  gap:1rem;
+}
+
+.item img,
+.item video{
+  width:100%;
+  height:auto;
+  border:1px solid #ccc;
+  box-sizing:border-box;
+  cursor:pointer;
+}
+
+.prompt{
+  width:100%;
+  height:120px;
+  margin-top:6px;
+  overflow:auto;
+  resize:vertical;
+  box-sizing:border-box;
+}
+
+/* ---------- light-box ---------- */
+#overlay{
+  display:none;
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.9);
+  z-index:9999;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  overflow:auto;
+  overscroll-behavior:contain;   /* stop background scrolling */
+}
+
+#overlay.scrollY{              /* vertical overflow when zoomed */
+  justify-content:flex-start;
+}
+
+#overlay img{
+  max-width:90vw;
+  max-height:90vh;
+  cursor:zoom-in;
+}
+
+#overlay img.zoomed{
+  max-width:none;
+  max-height:none;
+  cursor:zoom-out;
+}
+
+#overlay video{
+  max-width:90vw;
+  max-height:90vh;
+  cursor:default;              /* videos don’t zoom */
+}
+
+#caption{
+  color:#fff;
+  margin:1rem auto 0 auto;
+  text-align:center;
+  font-size:1rem;
+  padding:0 1rem;
+  max-width:90vw;
+}
