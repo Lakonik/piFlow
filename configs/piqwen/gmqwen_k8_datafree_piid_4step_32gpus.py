@@ -110,11 +110,6 @@ data = dict(
     persistent_workers=True,
     prefetch_factor=2
 )
-lr_config = dict(
-    policy='fixed',
-    warmup='linear',
-    warmup_iters=100,
-    warmup_ratio=0.001)
 checkpoint_config = dict(
     interval=save_interval,
     must_save_interval=must_save_interval,
