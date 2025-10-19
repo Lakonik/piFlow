@@ -98,7 +98,7 @@ def policy_rollout(
     x_t = x_t_start
 
     for substep_id in range(num_substeps.item()):
-        u = policy.u(x_t, sigma_t)
+        u = policy.pi(x_t, sigma_t)
 
         raw_t_minus = (raw_t - substep_size).clamp(min=0)
         sigma_t_minus = warp_t_fun(raw_t_minus)
@@ -203,7 +203,7 @@ def main():
                 raw_t_end=raw_t,
                 policy=detached_policy,
                 warp_t_fun=teacher.timestep_sampler.warp_t)
-            pred_u = policy.u(x_t, t)
+            pred_u = policy.pi(x_t, t)
             teacher_u = teacher.forward(
                 return_u=True, x_t=x_t, t=t, guidance_scale=guidance_scale, class_labels=class_labels)
             loss += F.mse_loss(pred_u, teacher_u) / num_intermediates

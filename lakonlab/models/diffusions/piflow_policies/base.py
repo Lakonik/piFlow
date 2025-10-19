@@ -4,7 +4,7 @@ from abc import ABCMeta, abstractmethod
 class BasePolicy(metaclass=ABCMeta):
 
     @abstractmethod
-    def u(self, x_t, sigma_t):
+    def pi(self, x_t, sigma_t):
         """Compute the flow velocity at (x_t, t).
 
         Args:

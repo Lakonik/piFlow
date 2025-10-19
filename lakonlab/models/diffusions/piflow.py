@@ -49,7 +49,7 @@ class PiFlowImitationBase(GaussianFlow):
         x_t = x_t_start
 
         for substep_id in range(max_num_substeps.item()):
-            u = policy.u(x_t, sigma_t)
+            u = policy.pi(x_t, sigma_t)
             
             raw_t_minus = (raw_t - substep_size).clamp(min=0)
             sigma_t_minus = self.timestep_sampler.warp_t(raw_t_minus, seq_len=seq_len)
@@ -85,7 +85,7 @@ class PiFlowImitationBase(GaussianFlow):
                 policy, seq_len=seq_len)
             pred_mean_u = (x_t_start - x_t_end) / (sigma_t_start - sigma_t_end).clamp(min=eps)
         if is_small_length.any():  # numerically stable local velocity
-            pred_local_u = policy.u(x_t_start, sigma_t_start)
+            pred_local_u = policy.pi(x_t_start, sigma_t_start)
         if pred_mean_u is None:
             pred_u = pred_local_u
         elif pred_local_u is None:

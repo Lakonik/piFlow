@@ -447,7 +447,7 @@ class PiFluxPipeline(FluxPipeline, PiFlowLoaderMixin):
                 for _ in range(num_inference_substeps[i]):
                     t = timesteps[timestep_id]
                     sigma_t = t / self.scheduler.config.num_train_timesteps
-                    u = policy.u(latents, sigma_t)
+                    u = policy.pi(latents, sigma_t)
                     latents = self.scheduler.step(u, t, latents, return_dict=False)[0]
                     timestep_id += 1
 

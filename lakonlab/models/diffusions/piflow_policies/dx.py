@@ -69,7 +69,7 @@ class DXPolicy(BasePolicy):
         x_interp = (t1 - t) * x0x1[:, 0] + (t - t0) * x0x1[:, 1]
         return x_interp
 
-    def u(self, x_t, sigma_t):
+    def pi(self, x_t, sigma_t):
         """Compute the flow velocity at (x_t, t).
 
         Args:
