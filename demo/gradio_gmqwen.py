@@ -35,7 +35,9 @@ def main():
         pipe.scheduler.config, shift=3.2, shift_terminal=None, use_dynamic_shifting=False)
     pipe = pipe.to('cuda')
 
-    def generate(seed, prompt, width, height, steps):
+    def generate(
+            seed, prompt, width, height, steps,
+            progress=gr.Progress(track_tqdm=True)):
         return pipe(
             prompt=prompt,
             width=width,

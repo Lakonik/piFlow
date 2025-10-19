@@ -58,7 +58,9 @@ def main():
 
     del base_pipe
 
-    def generate(seed, prompt, width, height, steps):
+    def generate(
+            seed, prompt, width, height, steps,
+            progress=gr.Progress(track_tqdm=True)):
         assert steps in [4, 8], 'Only 4 or 8 steps are supported.'
         pipe = pipe_4nfe if steps == 4 else pipe_8nfe
         return pipe(
