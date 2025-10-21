@@ -8,7 +8,7 @@ from mmgen.models.builder import MODELS, build_module
 from mmgen.utils import get_root_logger
 
 from .base import BaseModel
-from lakonlab.utils import tie_or_copy_untrained_params, materialize_meta_states, tie_untrained_submodules
+from lakonlab.utils import clone_params, tie_untrained_submodules
 
 
 @MODELS.register_module()
@@ -34,12 +34,10 @@ class Diffusion2D(BaseModel):
                 if isinstance(diffusion_ema.get('denoising', None), dict):
                     diffusion_ema['denoising'].pop('pretrained', None)
                 with init_empty_weights():
-                    self.diffusion_ema = build_module(diffusion_ema)  # deepcopy doesn't work due to the monkey patch lora
+                    self.diffusion_ema = build_module(diffusion_ema)
                 if tie_ema:
                     tie_untrained_submodules(self.diffusion_ema, self.diffusion)
-                else:
-                    tie_or_copy_untrained_params(self.diffusion_ema, self.diffusion, copy=True)
-                materialize_meta_states(self.diffusion_ema)
+                clone_params(self.diffusion_ema, self.diffusion)
 
         self.pretrained = pretrained
 

@@ -124,21 +124,10 @@ class ExponentialMovingAverageHookMod(ExponentialMovingAverageHook):
                     b_ema.data.copy_(b_net.data)
 
     def before_run(self, runner):
-        with torch.no_grad():
-            model = runner.model.module if is_module_wrapper(
-                runner.model) else runner.model
-
-            for k in self.module_keys:
-                if not rhasattr(model, k):
-                    raise RuntimeError(
-                        f'Cannot find {k} network for EMA hook.')
-                net = rgetattr(model, get_ori_key(k))
-                ema = rgetattr(model, k)
-
-                for p_net, p_ema in zip(net.parameters(), ema.parameters()):
-                    if self.trainable_only and not p_net.requires_grad:
-                        continue
-                    p_ema.data.copy_(p_net.data)
-
-                for b_net, b_ema in zip(net.buffers(), ema.buffers()):
-                    b_ema.data.copy_(b_net.data)
+        model = runner.model.module if is_module_wrapper(
+            runner.model) else runner.model
+        # sanity check for ema model
+        for k in self.module_keys:
+            if not rhasattr(model, k):
+                raise RuntimeError(
+                    f'Cannot find {k} network for EMA hook.')

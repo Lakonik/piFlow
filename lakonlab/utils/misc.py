@@ -105,29 +105,6 @@ class module_eval:
         self.module.train(self.prev)
 
 
-def tie_or_copy_untrained_params(tgt_module, src_module, tie_tgt_lora_base_layer=False, copy=False, recursive=True):
-    for key, val in src_module._parameters.items():
-        if (val is not None) \
-                and (key in tgt_module._parameters) \
-                and (not val.requires_grad) \
-                and (not tgt_module._parameters[key].requires_grad):
-            tgt_module._parameters[key] = val.clone() if copy else val
-    for key, val in src_module._buffers.items():
-        if key in tgt_module._buffers :
-            tgt_module._buffers[key] = val.clone() if copy else val
-    if recursive:
-        for key, val in src_module._modules.items():
-            if key in tgt_module._modules:
-                if (tie_tgt_lora_base_layer
-                        and isinstance(tgt_module._modules[key], LoraLayer)
-                        and not isinstance(val, LoraLayer)):
-                    tie_or_copy_untrained_params(
-                        tgt_module._modules[key]._modules['base_layer'], val, tie_tgt_lora_base_layer, copy)
-                else:
-                    tie_or_copy_untrained_params(
-                        tgt_module._modules[key], val, tie_tgt_lora_base_layer, copy)
-
-
 def all_frozen(modules):
     for module in modules:
         for p in module.parameters():
@@ -136,7 +113,7 @@ def all_frozen(modules):
     return True
 
 
-def tie_untrained_submodules(tgt_module, src_module, tie_tgt_lora_base_layer=False, copy_params=True):
+def tie_untrained_submodules(tgt_module, src_module, tie_tgt_lora_base_layer=False):
     for key, src_submodule in src_module._modules.items():
         if key in tgt_module._modules:
             if (tie_tgt_lora_base_layer
@@ -153,8 +130,23 @@ def tie_untrained_submodules(tgt_module, src_module, tie_tgt_lora_base_layer=Fal
                 else:
                     tie_untrained_submodules(
                         tgt_module._modules[key], src_submodule, tie_tgt_lora_base_layer)
-    if copy_params:
-        tie_or_copy_untrained_params(tgt_module, src_module, copy=True, recursive=False)
+
+
+def clone_params(tgt_module, src_module, recursive=True):
+    """Clone parameters and buffers from src_module to tgt_module (sharing the same structure).
+    Tied parameters/buffers are not cloned. Used for EMA model initialization.
+    """
+    for key, val in src_module._parameters.items():
+        if (val is not None) \
+                and (val is not tgt_module._parameters[key]):
+            tgt_module._parameters[key] = val.clone()
+    for key, val in src_module._buffers.items():
+        if val is not tgt_module._buffers[key]:
+            tgt_module._buffers[key] = val.clone()
+    if recursive:
+        for key, val in src_module._modules.items():
+            clone_params(
+                tgt_module._modules[key], val, recursive)
 
 
 @torch.no_grad()
