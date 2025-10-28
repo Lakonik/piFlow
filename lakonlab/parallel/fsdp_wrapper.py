@@ -223,7 +223,7 @@ class FSDPWrapper(nn.Module):
                     ignored_states = []
                     for p in module.parameters():
                         if not p.requires_grad:
-                            p.cuda()
+                            p.data = p.data.cuda()
                             ignored_states.append(p)
                     fsdp_kwargs.update(ignored_states=ignored_states)
                 module = FullyShardedDataParallelFix(

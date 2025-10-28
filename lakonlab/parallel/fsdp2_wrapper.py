@@ -89,7 +89,7 @@ class FSDP2Wrapper(nn.Module):
                     ignored_params = []
                     for p in module.parameters():
                         if not p.requires_grad:
-                            p.cuda()
+                            p.data = p.data.cuda()
                             ignored_params.append(p)
                 else:
                     ignored_params = None
