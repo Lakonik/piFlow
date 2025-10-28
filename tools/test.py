@@ -40,7 +40,7 @@ from lakonlab.parallel import apply_module_wrapper
 from lakonlab.runner.checkpoint import exists_ckpt
 
 _distributed_metrics = [
-    'FID', 'IS', 'FIDKID', 'PR', 'InceptionMetrics', 'ColorStats', 'HPSv2', 'VQAScore', 'CLIPSimilarity', 'OneIGBench']
+    'FID', 'IS', 'FIDKID', 'PR', 'InceptionMetrics', 'ColorStats', 'HPSv2', 'VQAScore', 'CLIPSimilarity', 'HPSv3']
 
 
 def parse_args():

@@ -16,11 +16,7 @@ from copy import deepcopy
 from contextlib import contextmanager, redirect_stdout, nullcontext
 from scipy import linalg
 from scipy.stats import entropy
-from torch.distributed.fsdp import MixedPrecision, ShardingStrategy, FullyShardedDataParallel
-from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torchvision import models
-from transformers import AutoTokenizer
-from transformers.models.t5.modeling_t5 import T5Block
 from mmcv.runner import get_dist_info, load_checkpoint
 from mmgen.utils import get_root_logger
 from mmgen.core.registry import METRICS
@@ -29,16 +25,12 @@ from mmgen.core.evaluation.metrics import (
 from mmgen.core.evaluation.metrics import FID as _FID
 from mmgen.core.evaluation.metrics import PR as _PR
 from open_clip import get_tokenizer, create_model
-from .vqa_score import (
-    default_question_template, default_answer_template, format_question, format_answer,
-    t5_tokenizer_image_token, IGNORE_INDEX, CLIPT5ForConditionalGeneration)
 from lakonlab.utils.io_utils import download_from_huggingface, download_from_url
 
 
 # Global caches for model loading
 _inception_cache = {}
 _hpsv2_cache = {}
-_vqascore_cache = {}
 _clip_cache = {}
 
 
@@ -194,8 +186,8 @@ def load_hpsv2(hps_version, device='cpu', precision='fp16'):
             'ViT-H-14-quickgelu',
             precision=precision,
             device=device,
-            output_dict=True,
-        )
+            output_dict=True)
+        model.requires_grad_(False)
         tokenizer = get_tokenizer('ViT-H-14')
     load_checkpoint(
         model,
@@ -204,45 +196,6 @@ def load_hpsv2(hps_version, device='cpu', precision='fp16'):
 
     result = model, tokenizer
     _hpsv2_cache[cache_key] = result
-    return result
-
-
-def load_vqascore(device, dtype, use_fsdp=True):
-    # Create cache key from arguments
-    cache_key = f"{device}_{dtype}_{use_fsdp}"
-    
-    # Check if model is already cached
-    if cache_key in _vqascore_cache:
-        return _vqascore_cache[cache_key]
-    
-    tokenizer = AutoTokenizer.from_pretrained(
-        'google/flan-t5-xxl', use_fast=False, model_max_length=2048)
-    model = CLIPT5ForConditionalGeneration.from_pretrained(
-        'zhiqiulin/clip-flant5-xxl',
-        torch_dtype=dtype,
-        use_cache=False,
-        freeze_mm_mlp_adapter=True)
-    model.requires_grad_(False)
-    model.resize_token_embeddings(len(tokenizer))
-
-    if use_fsdp:
-        mmcv.print_log('Wrapping VQAScore model with FSDP.')
-        model = FullyShardedDataParallel(
-            model,
-            device_id=torch.cuda.current_device(),
-            use_orig_params=False,
-            mixed_precision=MixedPrecision(
-                param_dtype=dtype,
-                reduce_dtype=torch.float32,
-                buffer_dtype=dtype,
-                cast_root_forward_inputs=False),
-            sharding_strategy=ShardingStrategy.HYBRID_SHARD,
-            auto_wrap_policy=ModuleWrapPolicy([T5Block]))
-    else:
-        model.to(device)
-    
-    result = model, tokenizer
-    _vqascore_cache[cache_key] = result
     return result
 
 
@@ -261,8 +214,8 @@ def load_openclip(
             pretrained=pretrained,
             precision=precision,
             device=device,
-            output_dict=True,
-        )
+            output_dict=True)
+        model.requires_grad_(False)
         tokenizer = get_tokenizer(model_name)
     _clip_cache[cache_key] = (model, tokenizer)
     return _clip_cache[cache_key]
@@ -366,7 +319,7 @@ class PR(_PR):
             ws = dist.get_world_size()
             placeholder = [torch.zeros_like(feat) for _ in range(ws)]
             dist.all_gather(placeholder, feat)
-            feat = torch.cat(placeholder, dim=0)
+            feat = torch.stack(placeholder, dim=1).reshape(feat.size(0) * ws, *feat.shape[1:])
 
         if (dist.is_initialized() and dist.get_rank() == 0) or not dist.is_initialized():
             if mode == 'reals':
@@ -773,11 +726,11 @@ class InceptionMetrics(Metric):
             ws = dist.get_world_size()
             placeholder = [torch.zeros_like(feat) for _ in range(ws)]
             dist.all_gather(placeholder, feat)
-            feat = torch.cat(placeholder, dim=0)
+            feat = torch.stack(placeholder, dim=1).reshape(feat.size(0) * ws, *feat.shape[1:])
             if mode == 'fakes':
                 placeholder = [torch.zeros_like(pred) for _ in range(ws)]
                 dist.all_gather(placeholder, pred)
-                pred = torch.cat(placeholder, dim=0)
+                pred = torch.stack(placeholder, dim=1).reshape(pred.size(0) * ws, *pred.shape[1:])
 
         # in distributed training, we only collect features at rank-0.
         if (dist.is_initialized() and dist.get_rank() == 0) or not dist.is_initialized():
@@ -1014,7 +967,7 @@ class ColorStats(Metric):
             ws = dist.get_world_size()
             placeholder = [torch.zeros_like(stats) for _ in range(ws)]
             dist.all_gather(placeholder, stats)
-            stats = torch.cat(placeholder, dim=0)
+            stats = torch.stack(placeholder, dim=1).reshape(stats.size(0) * ws, *stats.shape[1:])
 
         # in distributed training, we only collect features at rank-0.
         if (dist.is_initialized() and dist.get_rank() == 0) or not dist.is_initialized():
@@ -1125,7 +1078,7 @@ class HPSv2(Metric):
             ws = dist.get_world_size()
             placeholder = [torch.empty_like(hps_scores) for _ in range(ws)]
             dist.all_gather(placeholder, hps_scores)
-            hps_scores = torch.cat(placeholder, dim=0)
+            hps_scores = torch.stack(placeholder, dim=1).reshape(hps_scores.size(0) * ws)
 
         if (dist.is_initialized() and dist.get_rank() == 0) or not dist.is_initialized():
             self.scores.append(hps_scores.float().cpu())
@@ -1188,172 +1141,6 @@ class HPSv2(Metric):
         self.image_mean = self.image_mean.cpu()
         self.image_std = self.image_std.cpu()
         self.device = 'cpu'
-
-
-@METRICS.register_module()
-class VQAScore(Metric):
-    name = 'VQAScore'
-    requires_prompt = True
-
-    def __init__(self,
-                 num_images=None,
-                 use_fsdp=True):
-        super().__init__(num_images)
-        use_fsdp = use_fsdp and torch.cuda.is_available() and dist.is_initialized() and dist.get_world_size() > 0
-
-        self.use_fsdp = use_fsdp
-        self.dtype = torch.bfloat16
-        self.device = 'cuda' if use_fsdp else 'cpu'
-        
-        self.model, self.tokenizer = load_vqascore(device=self.device, dtype=self.dtype, use_fsdp=use_fsdp)
-        self.model.eval()
-        image_processor = self.model.get_vision_tower().image_processor
-        image_size = tuple(image_processor.crop_size.values())
-        assert len(image_size) == 2 and image_size[0] == image_size[1]
-        self.image_size = image_size[0]
-        self.image_mean = torch.tensor(image_processor.image_mean, device=self.device).view(3, 1, 1)
-        self.image_std = torch.tensor(image_processor.image_std, device=self.device).view(3, 1, 1)
-        self.clamp_high = (1 - self.image_mean) / self.image_std
-        self.clamp_low = -self.image_mean / self.image_std
-
-    def prepare(self):
-        self.scores = []
-
-    def resize(self, imgs):
-        h, w = imgs.shape[2:]
-        if h != w:
-            pad_size = max(h, w)
-            pad_h = pad_size - h
-            pad_w = pad_size - w
-            imgs = F.pad(
-                imgs, (pad_w // 2, pad_w - pad_w // 2, pad_h // 2, pad_h - pad_h // 2), mode='constant', value=0)
-            h = w = pad_size
-        if h != self.image_size:
-            imgs = F.interpolate(imgs, size=self.image_size, mode='bicubic', align_corners=False, antialias=True)
-            imgs = torch.maximum(torch.minimum(imgs, self.clamp_high), self.clamp_low)
-        return imgs
-
-    @torch.no_grad()
-    def feed_op(self, batch, mode):
-        imgs = batch['imgs']
-        prompts = batch['prompts']
-
-        imgs = (imgs.to(device=self.device, dtype=torch.float32) / 2 + 0.5).clamp(0, 1)
-        imgs = self.resize((imgs - self.image_mean) / self.image_std).to(dtype=self.dtype)
-
-        # ========= preprocess prompts =========
-        questions = [default_question_template.format(prompt) for prompt in prompts]
-        answers = [default_answer_template.format(prompt) for prompt in prompts]
-
-        questions = [format_question(question, conversation_style='t5_chat') for question in questions]
-        answers = [format_answer(answer, conversation_style='t5_chat') for answer in answers]
-
-        input_ids = [t5_tokenizer_image_token(question, self.tokenizer, return_tensors='pt') for question in questions]
-        labels = [t5_tokenizer_image_token(answer, self.tokenizer, return_tensors='pt') for answer in answers]
-
-        input_ids = torch.nn.utils.rnn.pad_sequence(
-            input_ids, batch_first=True, padding_value=0)[:, :self.tokenizer.model_max_length]
-        labels = torch.nn.utils.rnn.pad_sequence(
-            labels, batch_first=True, padding_value=IGNORE_INDEX)[:, :self.tokenizer.model_max_length]
-
-        input_ids = input_ids.to(device=self.device)
-        labels = labels.to(device=self.device)
-
-        attention_mask = input_ids.ne(self.tokenizer.pad_token_id).to(device=self.device)
-        decoder_attention_mask = labels.ne(IGNORE_INDEX).to(device=self.device)
-
-        outputs = self.model(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            decoder_attention_mask=decoder_attention_mask,
-            labels=labels,
-            images=imgs,
-            past_key_values=None,
-            inputs_embeds=None,
-            use_cache=None,
-            output_attentions=None,
-            output_hidden_states=None,
-            return_dict=True,
-        )
-
-        logits = outputs.logits
-        bs, seq_len, vocab_size = logits.size()
-        vqa_score = (-F.cross_entropy(
-            logits.reshape(bs * seq_len, vocab_size), labels.reshape(bs * seq_len), reduction='none'
-        ).reshape(bs, 2).mean(dim=1)).exp()  # (bs, )
-
-        if dist.is_initialized():
-            ws = dist.get_world_size()
-            placeholder = [torch.empty_like(vqa_score) for _ in range(ws)]
-            dist.all_gather(placeholder, vqa_score)
-            vqa_score = torch.cat(placeholder, dim=0)
-
-        if (dist.is_initialized() and dist.get_rank() == 0) or not dist.is_initialized():
-            self.scores.append(vqa_score.float().cpu())
-
-    def feed(self, batch, mode):
-        if mode == 'reals':
-            return 0
-
-        if self.num_images is None:
-            self.feed_op(batch, mode)
-
-        else:
-            _, ws = get_dist_info()
-
-            if self.num_fake_feeded == self.num_fake_need:
-                return 0
-
-            if isinstance(batch, dict):
-                batch_size = len(list(batch.values())[0])
-                end = min(batch_size, self.num_fake_need - self.num_fake_feeded)
-                batch_to_feed = {k: v[:end] for k, v in batch.items()}
-            else:
-                batch_size = batch.shape[0]
-                end = min(batch_size, self.num_fake_need - self.num_fake_feeded)
-                batch_to_feed = batch[:end]
-
-            global_end = min(batch_size * ws,
-                             self.num_fake_need - self.num_fake_feeded)
-            self.feed_op(batch_to_feed, mode)
-            self.num_fake_feeded += global_end
-            return end
-
-    @torch.no_grad()
-    def summary(self):
-        scores = torch.cat(self.scores, dim=0)
-        if self.num_images is not None:
-            assert scores.shape[0] >= self.num_images
-            scores = scores[:self.num_images]
-        mean_score = scores.mean().item()
-        self._result_dict = dict(vqascore=mean_score)
-        self._result_str = f'VQAScore: {mean_score:.4f}'
-        return mean_score
-
-    def clear_fake_data(self):
-        self.scores = []
-        self.num_fake_feeded = 0
-
-    def clear(self, clear_reals=False):
-        self.clear_fake_data()
-
-    def load_to_gpu(self):
-        if torch.cuda.is_available() and not isinstance(self.model, FullyShardedDataParallel):
-            self.model.cuda()
-            self.image_mean = self.image_mean.cuda()
-            self.image_std = self.image_std.cuda()
-            self.clamp_high = self.clamp_high.cuda()
-            self.clamp_low = self.clamp_low.cuda()
-            self.device = 'cuda'
-
-    def offload_to_cpu(self):
-        if not isinstance(self.model, FullyShardedDataParallel):
-            self.model.cpu()
-            self.image_mean = self.image_mean.cpu()
-            self.image_std = self.image_std.cpu()
-            self.clamp_high = self.clamp_high.cpu()
-            self.clamp_low = self.clamp_low.cpu()
-            self.device = 'cpu'
 
 
 @METRICS.register_module()
@@ -1477,7 +1264,7 @@ class CLIPSimilarity(Metric):
             ws = dist.get_world_size()
             bucket = [torch.empty_like(sim) for _ in range(ws)]
             dist.all_gather(bucket, sim)
-            sim = torch.cat(bucket, dim=0)
+            sim = torch.stack(bucket, dim=1).reshape(sim.size(0) * ws)
 
         if (dist.is_initialized() and dist.get_rank() == 0) or not dist.is_initialized():
             self.scores.append(sim.cpu())
