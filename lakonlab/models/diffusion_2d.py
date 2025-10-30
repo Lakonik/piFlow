@@ -18,7 +18,6 @@ class Diffusion2D(BaseModel):
                  diffusion=dict(type='GMFlow'),
                  diffusion_use_ema=False,
                  tie_ema=True,
-                 pretrained=None,
                  inference_only=False,
                  train_cfg=None,
                  test_cfg=None):
@@ -38,11 +37,6 @@ class Diffusion2D(BaseModel):
                 if tie_ema:
                     tie_untrained_submodules(self.diffusion_ema, self.diffusion)
                 clone_params(self.diffusion_ema, self.diffusion)
-
-        self.pretrained = pretrained
-
-        if self.pretrained is not None:
-            self.load_checkpoint(self.pretrained, map_location='cpu', strict=False, logger=get_root_logger())
 
         self.train_cfg = dict() if train_cfg is None else deepcopy(train_cfg)
         self.test_cfg = dict() if test_cfg is None else deepcopy(test_cfg)
