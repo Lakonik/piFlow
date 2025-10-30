@@ -1,7 +1,7 @@
 # Copyright (c) 2025 Hansheng Chen
 
 import os
-
+import time
 import mimetypes
 import tempfile
 import subprocess
@@ -14,6 +14,7 @@ from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from io import BytesIO
+from functools import wraps
 from typing import Generator, Union
 from PIL import Image
 from boto3.s3.transfer import TransferConfig
@@ -36,6 +37,24 @@ TMP_DIR = '/dev/shm' if os.path.isdir('/dev/shm') else tempfile.gettempdir()
 S3_TRANSFER_CONFIG = TransferConfig(multipart_threshold=S3_MULTIPART_THRESHOLD)
 
 
+def retry(tries=5, delay=3, exceptions=(Exception,)):
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, tries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except exceptions as e:
+                    if attempt == tries:
+                        print(f"Attempt {attempt} failed: {e}. No more retries.")
+                        raise
+                    print(f"Attempt {attempt} failed: {e}. Retrying in {delay} seconds...")
+                    time.sleep(delay)
+        return wrapper
+    return decorator
+
+
+@retry()
 def download_from_url(url,
                       dest_path=None,
                       dest_dir=MMGEN_CACHE_DIR,
@@ -75,6 +94,7 @@ def download_from_url(url,
     return dest_path
 
 
+@retry()
 def download_from_huggingface(filename):
     filename = filename.replace('huggingface://', '').split('/')
     repo_id = '/'.join(filename[:2])
@@ -130,6 +150,7 @@ class S3Backend(BaseStorageBackend):
             extra_args['ContentEncoding'] = 'gzip'
         return extra_args
 
+    @retry()
     def get(self, filepath: Union[str, Path]) -> bytes:
         filepath = str(filepath)
         bucket, prefix = self._split_s3_url(filepath)
@@ -141,6 +162,7 @@ class S3Backend(BaseStorageBackend):
     def get_text(self, filepath: Union[str, Path], encoding: str = 'utf-8') -> str:
         return self.get(filepath).decode(encoding)
 
+    @retry()
     def put(self, obj: bytes, filepath: Union[str, Path]) -> None:
         filepath = str(filepath)
         extra_args = self._infer_s3_extra_args(filepath)
@@ -174,11 +196,13 @@ class S3Backend(BaseStorageBackend):
                  encoding: str = 'utf-8') -> None:
         self.put(bytes(obj, encoding=encoding), filepath)
 
+    @retry()
     def remove(self, filepath: Union[str, Path]) -> None:
         filepath = str(filepath)
         bucket, prefix = self._split_s3_url(filepath)
         self._client.delete_object(Bucket=bucket, Key=prefix)
 
+    @retry()
     def exists(self, filepath: Union[str, Path]) -> bool:
         filepath = str(filepath)
         bucket, prefix = self._split_s3_url(filepath)
@@ -235,6 +259,7 @@ class S3Backend(BaseStorageBackend):
         finally:
             os.remove(f.name)
 
+    @retry()
     def list_dir_or_file(
             self,
             dir_path: Union[str, Path],
