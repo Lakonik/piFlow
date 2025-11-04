@@ -20,7 +20,7 @@ class LatentDiffusionClassImage(BaseDiffusion):
         super().__init__(*args, **kwargs)
         self.vae = build_module(vae) if vae is not None else None
 
-    def _prepare_train_step_args(self, data, running_status=None):
+    def _prepare_train_minibatch_args(self, data, running_status=None):
         if 'latents' in data:
             latents = data['latents']
         elif 'images' in data:

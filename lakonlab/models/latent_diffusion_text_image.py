@@ -22,7 +22,7 @@ class LatentDiffusionTextImage(BaseDiffusion):
         self.vae = build_module(vae) if vae is not None else None
         self.text_encoder = build_module(text_encoder) if text_encoder is not None else None
 
-    def _prepare_train_step_diffusion_args(self, data):
+    def _prepare_train_minibatch_diffusion_args(self, data):
         if 'prompt_embed_kwargs' in data:
             prompt_embed_kwargs = data['prompt_embed_kwargs']
         elif 'prompt_kwargs' in data:
@@ -59,7 +59,7 @@ class LatentDiffusionTextImage(BaseDiffusion):
 
         return diffusion_args, diffusion_kwargs, prompt_embed_kwargs, bs, device
 
-    def _prepare_train_step_teacher_args(self, data, prompt_embed_kwargs, bs, device):
+    def _prepare_train_minibatch_teacher_args(self, data, prompt_embed_kwargs, bs, device):
         teacher_guidance_scale = self.train_cfg.get('teacher_guidance_scale', None)
         teacher_use_guidance = (teacher_guidance_scale is not None
                                 and teacher_guidance_scale != 0.0 and teacher_guidance_scale != 1.0)
@@ -88,15 +88,15 @@ class LatentDiffusionTextImage(BaseDiffusion):
 
         return teacher_kwargs
 
-    def _prepare_train_step_args(self, data, running_status=None):
+    def _prepare_train_minibatch_args(self, data, running_status=None):
         diffusion_args, diffusion_kwargs, prompt_embed_kwargs, bs, device = \
-            self._prepare_train_step_diffusion_args(data)
+            self._prepare_train_minibatch_diffusion_args(data)
         parameters = inspect.signature(rgetattr(self.diffusion, 'forward_train')).parameters
         if 'running_status' in parameters:
             diffusion_kwargs['running_status'] = running_status
 
         if 'teacher' in parameters and 'teacher_kwargs' in parameters and self.teacher is not None:
-            teacher_kwargs = self._prepare_train_step_teacher_args(
+            teacher_kwargs = self._prepare_train_minibatch_teacher_args(
                 data, prompt_embed_kwargs, bs, device)
 
             diffusion_kwargs.update(

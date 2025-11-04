@@ -103,17 +103,17 @@ class BaseModel(nn.Module, metaclass=ABCMeta):
         return log_vars
 
     @abstractmethod
-    def train_step_single(self, data, loss_scaler=None, running_status=None):
-        """Training iteration inside a single gradient accumulation step.
+    def train_minibatch(self, data, loss_scaler=None, running_status=None):
+        """Training forward/backward inside a single gradient accumulation minibatch.
         """
 
     def train_grad_accum(
-            self, train_step_func, data_splits, optimizer, grad_accum_steps, loss_scaler=None, running_status=None):
+            self, train_minibatch_func, data_splits, optimizer, grad_accum_steps, loss_scaler=None, running_status=None):
         log_vars = dict()
 
         bs = 0
         for grad_step_id in range(grad_accum_steps):
-            log_vars_single, bs_single = train_step_func(
+            log_vars_single, bs_single = train_minibatch_func(
                 data_splits[grad_step_id], loss_scaler, running_status)
             for k, v in log_vars_single.items():
                 if k in log_vars:
@@ -156,7 +156,7 @@ class BaseModel(nn.Module, metaclass=ABCMeta):
         data_splits = chunk_data_dict(data, grad_accum_steps)
 
         log_vars, bs = self.train_grad_accum(
-            self.train_step_single,
+            self.train_minibatch,
             data_splits,
             optimizer,
             grad_accum_steps,

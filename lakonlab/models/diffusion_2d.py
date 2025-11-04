@@ -40,7 +40,7 @@ class Diffusion2D(BaseModel):
         self.train_cfg = dict() if train_cfg is None else deepcopy(train_cfg)
         self.test_cfg = dict() if test_cfg is None else deepcopy(test_cfg)
 
-    def train_step_single(self, data, loss_scaler=None, running_status=None):
+    def train_minibatch(self, data, loss_scaler=None, running_status=None):
         bs = data['x'].size(0)
 
         loss, log_vars = self.diffusion(

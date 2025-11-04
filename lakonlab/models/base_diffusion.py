@@ -158,9 +158,9 @@ class BaseDiffusion(BaseModel):
         return x
 
     @abstractmethod
-    def _prepare_train_step_args(self, data, running_status=None):
+    def _prepare_train_minibatch_args(self, data, running_status=None):
         """
-        Prepare the arguments for the training step.
+        Prepare the arguments for the training minibatch.
 
         Args:
             data (dict): The input data for the training step.
@@ -170,8 +170,8 @@ class BaseDiffusion(BaseModel):
             tuple: A tuple containing the batch size, diffusion arguments, and diffusion keyword arguments.
         """
 
-    def train_step_single(self, data, loss_scaler=None, running_status=None):
-        bs, diffusion_args, diffusion_kwargs = self._prepare_train_step_args(data, running_status)
+    def train_minibatch(self, data, loss_scaler=None, running_status=None):
+        bs, diffusion_args, diffusion_kwargs = self._prepare_train_minibatch_args(data, running_status)
         log_vars = train_fwd_bwd(self.diffusion, diffusion_args, diffusion_kwargs, loss_scaler)
         return log_vars, bs
 
