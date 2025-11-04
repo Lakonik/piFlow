@@ -5,7 +5,6 @@ import torch
 from copy import deepcopy
 from accelerate import init_empty_weights
 from mmgen.models.builder import MODELS, build_module
-from mmgen.utils import get_root_logger
 
 from .base import BaseModel
 from lakonlab.utils import clone_params, tie_untrained_submodules

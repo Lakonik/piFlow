@@ -134,7 +134,7 @@ class GaussianFlow(nn.Module):
         num_batches = x_0.size(0)
         seq_len = x_0.shape[2:].numel()  # h * w or t * h * w
 
-        t = self.timestep_sampler(num_batches, seq_len=seq_len).to(device)
+        t = self.timestep_sampler(num_batches, seq_len=seq_len, device=device)
 
         noise = torch.randn_like(x_0)
         x_t, _, _ = self.sample_forward_diffusion(x_0, t, noise)

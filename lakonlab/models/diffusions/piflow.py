@@ -104,10 +104,10 @@ class PiFlowImitationBase(GaussianFlow):
         return ndim, bs, seq_len
 
     def piid_segment(
-            self, teacher, x_t_src, raw_t_src, sigma_t_src, t_src, teacher_ratio, segment_size,
-            kwargs, teacher_kwargs, get_x_t_dst=False):
+            self, teacher, policy, x_t_src, raw_t_src, sigma_t_src, teacher_ratio, segment_size,
+            teacher_kwargs, get_x_t_dst=False):
         eps = self.train_cfg.get('eps', 1e-4)
-        total_substeps = self.train_cfg.get('total_substeps', self.num_timesteps)
+        total_substeps = self.train_cfg.get('total_substeps', 128)
         num_intermediate_states = self.train_cfg.get('num_intermediate_states', 2)
         window_substeps = self.train_cfg.get('window_substeps', 0)
 
@@ -123,10 +123,6 @@ class PiFlowImitationBase(GaussianFlow):
         window_size = torch.minimum(window_substeps * substep_size, segment_size)
 
         raw_t_dst = raw_t_src - segment_size
-
-        denoising_output = self.pred(x_t_src, t_src, **kwargs)
-        policy = self.policy_class(
-            denoising_output, x_t_src, sigma_t_src, eps=eps)
 
         policy_detached = policy.detach()
         if isinstance(policy_detached, GMFlowPolicy):
@@ -159,26 +155,26 @@ class PiFlowImitationBase(GaussianFlow):
         all_timesteps = []
 
         for teacher_step_id in range(num_intermediate_states):
-            raw_t1 = (raw_t - student_intervals[:, teacher_step_id]).clamp(min=0)
-            raw_t2 = (raw_t1 - teacher_intervals[:, teacher_step_id]).clamp(min=0)
+            raw_t_a = (raw_t - student_intervals[:, teacher_step_id]).clamp(min=0)
+            raw_t_b = (raw_t_a - teacher_intervals[:, teacher_step_id]).clamp(min=0)
 
             with torch.no_grad(), module_eval(teacher):
-                x_t1, sigma_t1, t1 = self.policy_rollout(
-                    x_t, sigma_t, raw_t, raw_t1, total_substeps,
+                x_t_a, sigma_t_a, t_a = self.policy_rollout(
+                    x_t, sigma_t, raw_t, raw_t_a, total_substeps,
                     policy_detached, seq_len=seq_len)
-                tgt_u = teacher(return_u=True, x_t=x_t1, t=t1, **teacher_kwargs)
+                tgt_u = teacher(return_u=True, x_t=x_t_a, t=t_a, **teacher_kwargs)
                 all_tgt_u.append(tgt_u)
-                all_timesteps.append(t1)
+                all_timesteps.append(t_a)
 
             pred_u = self.policy_average_u(
-                x_t1, sigma_t1, raw_t1, raw_t2 - window_size, total_substeps,
+                x_t_a, sigma_t_a, raw_t_a, raw_t_b - window_size, total_substeps,
                 policy, seq_len=seq_len, eps=eps)
             all_pred_u.append(pred_u)
 
-            sigma_t2 = self.timestep_sampler.warp_t(raw_t2, seq_len=seq_len).reshape(bs, *((ndim - 1) * [1]))
-            x_t = x_t1 + tgt_u * (sigma_t2 - sigma_t1)
-            raw_t = raw_t2
-            sigma_t = sigma_t2
+            sigma_t_b = self.timestep_sampler.warp_t(raw_t_b, seq_len=seq_len).reshape(bs, *((ndim - 1) * [1]))
+            x_t = x_t_a + tgt_u * (sigma_t_b - sigma_t_a)
+            raw_t = raw_t_b
+            sigma_t = sigma_t_b
 
         loss_kwargs = dict(
             u_t_pred=torch.cat(all_pred_u, dim=0),
@@ -195,7 +191,7 @@ class PiFlowImitationBase(GaussianFlow):
         else:
             x_t_dst = None
 
-        return loss, x_t_dst, raw_t_dst, policy
+        return loss, x_t_dst, raw_t_dst
 
     def forward_test(
             self, x_0=None, noise=None, guidance_scale=None,
@@ -311,9 +307,12 @@ class PiFlowImitation(PiFlowImitationBase):
         noise = torch.randn_like(x_0)
         x_t_src, _, _ = self.sample_forward_diffusion(x_0, t_src, noise)
 
-        loss_diffusion, _, _, _ = self.piid_segment(
-            teacher, x_t_src, raw_t_src, sigma_t_src, t_src, teacher_ratio, segment_size,
-            kwargs, teacher_kwargs)
+        denoising_output = self.pred(x_t_src, t_src, **kwargs)
+        policy = self.policy_class(denoising_output, x_t_src, sigma_t_src)
+
+        loss_diffusion, _, _ = self.piid_segment(
+            teacher, policy, x_t_src, raw_t_src, sigma_t_src, teacher_ratio, segment_size,
+            teacher_kwargs)
 
         loss = loss_diffusion
         log_vars.update(self.flow_loss.log_vars)
@@ -379,17 +378,12 @@ class PiFlowImitationDataFree(PiFlowImitationBase):
             num_batches, *((ndim - 1) * [1]))
         t_src = sigma_t_src.flatten() * self.num_timesteps
 
-        step_loss_diffusion, x_t_dst, raw_t_dst, _ = self.piid_segment(
-            teacher, x_t_src, raw_t_src, sigma_t_src, t_src, teacher_ratio, segment_size,
-            kwargs, teacher_kwargs, get_x_t_dst=True)
+        denoising_output = self.pred(x_t_src, t_src, **kwargs)
+        policy = self.policy_class(denoising_output, x_t_src, sigma_t_src)
 
-        if step_id < nfe - 1:
-            step_states.update(
-                step_id=step_id + 1,
-                x_t_src=x_t_dst,
-                raw_t_src=raw_t_dst)
-        else:
-            step_states.update(terminate=True)
+        step_loss_diffusion, x_t_dst, raw_t_dst = self.piid_segment(
+            teacher, policy, x_t_src, raw_t_src, sigma_t_src, teacher_ratio, segment_size,
+            teacher_kwargs, get_x_t_dst=True)
 
         loss_diffusion = step_loss_diffusion * segment_size  # Weighing by segment size
         loss = loss_diffusion
@@ -398,6 +392,14 @@ class PiFlowImitationDataFree(PiFlowImitationBase):
             'loss_diffusion': float(loss_diffusion),
             f'loss_diffusion_step{step_id}': float(step_loss_diffusion)
         })
+
+        if step_id < nfe - 1:
+            step_states.update(
+                step_id=step_id + 1,
+                x_t_src=x_t_dst,
+                raw_t_src=raw_t_dst)
+        else:
+            step_states.update(terminate=True)
 
         return loss, log_vars, step_states
 

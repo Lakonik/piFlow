@@ -57,15 +57,14 @@ class LatentDiffusionClassImage(BaseDiffusion):
             teacher_use_guidance = (teacher_guidance_scale is not None
                                     and teacher_guidance_scale != 0.0 and teacher_guidance_scale != 1.0)
             if teacher_use_guidance:
-                teacher_labels = torch.cat([data['negative_labels'], labels], dim=0)
+                teacher_kwargs = dict(class_labels=torch.cat([data['negative_labels'], labels], dim=0))
+                teacher_kwargs.update(guidance_scale=teacher_guidance_scale)
             else:
-                teacher_labels = labels
+                teacher_kwargs = dict(class_labels=labels)
+
             diffusion_kwargs.update(
                 teacher=self.teacher,
-                teacher_kwargs=dict(
-                    class_labels=teacher_labels))
-            if teacher_guidance_scale is not None:
-                diffusion_kwargs['teacher_kwargs'].update(guidance_scale=teacher_guidance_scale)
+                teacher_kwargs=teacher_kwargs)
 
         return bs, diffusion_args, diffusion_kwargs
 

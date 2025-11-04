@@ -6,10 +6,39 @@ from abc import abstractmethod
 from copy import deepcopy
 from accelerate import init_empty_weights
 from mmgen.models.builder import build_module
-from mmgen.utils import get_root_logger
 
 from .base import BaseModel
 from lakonlab.utils import clone_params, rgetattr, tie_untrained_submodules
+
+
+def train_fwd_bwd(model, args, kwargs, loss_scaler=None):
+    is_multistep = rgetattr(model, 'is_multistep', False)
+
+    if is_multistep:
+        step_states, log_vars = model(*args, return_step_states=True, **kwargs)
+        loss = 0
+        step_id = 0
+        while not step_states['terminate']:
+            step_loss, step_log_vars, step_states = model(
+                *args, return_loss=True, step_states=step_states, **kwargs)
+            if step_states['detachable']:
+                step_loss.backward() if loss_scaler is None else loss_scaler.scale(step_loss).backward()
+                step_loss.detach_()
+            loss = loss + step_loss
+            for k, v in step_log_vars.items():
+                if k in log_vars:
+                    log_vars[k] += v
+                else:
+                    log_vars[k] = v
+            step_id += 1
+
+    else:
+        loss, log_vars = model(*args, return_loss=True, **kwargs)
+
+    if isinstance(loss, torch.Tensor) and loss.requires_grad:
+        loss.backward() if loss_scaler is None else loss_scaler.scale(loss).backward()
+
+    return log_vars
 
 
 class BaseDiffusion(BaseModel):
@@ -143,32 +172,7 @@ class BaseDiffusion(BaseModel):
 
     def train_step_single(self, data, loss_scaler=None, running_status=None):
         bs, diffusion_args, diffusion_kwargs = self._prepare_train_step_args(data, running_status)
-        is_multistep = rgetattr(self.diffusion, 'is_multistep', False)
-
-        if is_multistep:
-            step_states, log_vars = self.diffusion(*diffusion_args, return_step_states=True, **diffusion_kwargs)
-            loss = 0
-            step_id = 0
-            while not step_states['terminate']:
-                step_loss, step_log_vars, step_states = self.diffusion(
-                    *diffusion_args, return_loss=True, step_states=step_states, **diffusion_kwargs)
-                if step_states['detachable']:
-                    step_loss.backward() if loss_scaler is None else loss_scaler.scale(step_loss).backward()
-                    step_loss.detach_()
-                loss = loss + step_loss
-                for k, v in step_log_vars.items():
-                    if k in log_vars:
-                        log_vars[k] += v
-                    else:
-                        log_vars[k] = v
-                step_id += 1
-
-        else:
-            loss, log_vars = self.diffusion(*diffusion_args, return_loss=True, **diffusion_kwargs)
-
-        if isinstance(loss, torch.Tensor) and loss.requires_grad:
-            loss.backward() if loss_scaler is None else loss_scaler.scale(loss).backward()
-
+        log_vars = train_fwd_bwd(self.diffusion, diffusion_args, diffusion_kwargs, loss_scaler)
         return log_vars, bs
 
     @abstractmethod

@@ -22,7 +22,7 @@ class LatentDiffusionTextImage(BaseDiffusion):
         self.vae = build_module(vae) if vae is not None else None
         self.text_encoder = build_module(text_encoder) if text_encoder is not None else None
 
-    def _prepare_train_step_args(self, data, running_status=None):
+    def _prepare_train_step_diffusion_args(self, data):
         if 'prompt_embed_kwargs' in data:
             prompt_embed_kwargs = data['prompt_embed_kwargs']
         elif 'prompt_kwargs' in data:
@@ -57,40 +57,51 @@ class LatentDiffusionTextImage(BaseDiffusion):
                 (bs,), distilled_guidance_scale, dtype=torch.float32, device=device)
             diffusion_kwargs.update(guidance=distilled_guidance_scale)
 
-        parameters = inspect.signature(rgetattr(self.diffusion, 'forward_train')).parameters
+        return diffusion_args, diffusion_kwargs, prompt_embed_kwargs, bs, device
 
+    def _prepare_train_step_teacher_args(self, data, prompt_embed_kwargs, bs, device):
+        teacher_guidance_scale = self.train_cfg.get('teacher_guidance_scale', None)
+        teacher_use_guidance = (teacher_guidance_scale is not None
+                                and teacher_guidance_scale != 0.0 and teacher_guidance_scale != 1.0)
+        if teacher_use_guidance:
+            if 'negative_prompt_embed_kwargs' in data:
+                negative_prompt_embed_kwargs = data['negative_prompt_embed_kwargs']
+            elif 'negative_prompt_kwargs' in data:
+                negative_prompt_embed_kwargs = self.text_encoder(**data['negative_prompt_kwargs'])
+            else:
+                raise ValueError(
+                    'Either `negative_prompt_embed_kwargs` or `negative_prompt_kwargs` should be provided in the '
+                    'input data for classifier-free guidance.')
+            teacher_kwargs = {
+                k: torch.cat([negative_prompt_embed_kwargs[k], v], dim=0)
+                for k, v in prompt_embed_kwargs.items()}
+            teacher_kwargs.update(guidance_scale=teacher_guidance_scale)
+        else:
+            teacher_kwargs = prompt_embed_kwargs.copy()
+
+        teacher_distilled_guidance_scale = self.train_cfg.get('teacher_distilled_guidance_scale', None)
+        if teacher_distilled_guidance_scale is not None:
+            teacher_distilled_guidance_scale = torch.full(
+                (bs * 2,) if teacher_use_guidance else (bs,),
+                teacher_distilled_guidance_scale, dtype=torch.float32, device=device)
+            teacher_kwargs.update(guidance=teacher_distilled_guidance_scale)
+
+        return teacher_kwargs
+
+    def _prepare_train_step_args(self, data, running_status=None):
+        diffusion_args, diffusion_kwargs, prompt_embed_kwargs, bs, device = \
+            self._prepare_train_step_diffusion_args(data)
+        parameters = inspect.signature(rgetattr(self.diffusion, 'forward_train')).parameters
         if 'running_status' in parameters:
             diffusion_kwargs['running_status'] = running_status
 
         if 'teacher' in parameters and 'teacher_kwargs' in parameters and self.teacher is not None:
-            teacher_guidance_scale = self.train_cfg.get('teacher_guidance_scale', None)
-            teacher_use_guidance = (teacher_guidance_scale is not None
-                                    and teacher_guidance_scale != 0.0 and teacher_guidance_scale != 1.0)
-            if teacher_use_guidance:
-                if 'negative_prompt_embed_kwargs' in data:
-                    negative_prompt_embed_kwargs = data['negative_prompt_embed_kwargs']
-                elif 'negative_prompt_kwargs' in data:
-                    negative_prompt_embed_kwargs = self.text_encoder(**data['negative_prompt_kwargs'])
-                else:
-                    raise ValueError(
-                        'Either `negative_prompt_embed_kwargs` or `negative_prompt_kwargs` should be provided in the '
-                        'input data for classifier-free guidance.')
-                teacher_prompt_embed_kwargs = {
-                    k: torch.cat([negative_prompt_embed_kwargs[k], v], dim=0)
-                    for k, v in prompt_embed_kwargs.items()}
-            else:
-                teacher_prompt_embed_kwargs = prompt_embed_kwargs.copy()
+            teacher_kwargs = self._prepare_train_step_teacher_args(
+                data, prompt_embed_kwargs, bs, device)
+
             diffusion_kwargs.update(
                 teacher=self.teacher,
-                teacher_kwargs=teacher_prompt_embed_kwargs)
-            if teacher_guidance_scale is not None:
-                diffusion_kwargs['teacher_kwargs'].update(guidance_scale=teacher_guidance_scale)
-            teacher_distilled_guidance_scale = self.train_cfg.get('teacher_distilled_guidance_scale', None)
-            if teacher_distilled_guidance_scale is not None:
-                teacher_distilled_guidance_scale = torch.full(
-                    (bs * 2,) if teacher_use_guidance else (bs,),
-                    teacher_distilled_guidance_scale, dtype=torch.float32, device=device)
-                diffusion_kwargs['teacher_kwargs'].update(guidance=teacher_distilled_guidance_scale)
+                teacher_kwargs=teacher_kwargs)
 
         return bs, diffusion_args, diffusion_kwargs
 
