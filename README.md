@@ -18,7 +18,12 @@ Official PyTorch implementation of the paper:
 
 <img src="assets/teaser.jpg" alt=""/>
 
+## 🔥News
+
+- [Nov 7, 2025] [ComfyUI-piFlow](https://github.com/Lakonik/ComfyUI-piFlow) is now available! Supports 4-step sampling of Qwen-Image and Flux.1 dev using 8-bit models on a single consumer-grade GPU, powered by [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
+
 ## Highlights
+
 - **Novel Framework**: pi-Flow stands for policy-based flow models. The network does not output a denoised state; instead, it outputs a fast policy that rolls out multiple ODE substeps to reach the denoised state.
 
   <img src="assets/piflow_framework_comparison.png" width="1000" alt=""/>
