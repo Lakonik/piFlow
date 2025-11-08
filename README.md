@@ -36,6 +36,10 @@ Official PyTorch implementation of the paper:
 
   <img src="assets/diversity_comparison.jpg" width="1000" alt=""/>
 
+- **Texture Details**: pi-Flow excels in generating fine-grained texture details. When using additional photorealistic style LoRAs, this advantage becomes very prominent, as shown in the comparison below (zoom in for best view).
+
+  <img src="assets/piflow_dmd_texture_comparison.jpg" width="1000" alt=""/>
+
 - **Scalability**: pi-Flow scales from ImageNet DiT to 20-billion-parameter text-to-image models (Qwen-Image). This codebase is highly optimized for large-scale experiments. See the [Codebase](#codebase) section for details.
 
 ## Installation
