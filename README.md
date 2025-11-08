@@ -12,7 +12,7 @@ Official PyTorch implementation of the paper:
 [Sai Bi](https://sai-bi.github.io/)<sup>2</sup><br>
 <sup>1</sup>Stanford University, <sup>2</sup>Adobe Research
 <br>
-[[arXiv](https://arxiv.org/abs/2510.14974)] [[pi-Qwen Demo🤗](https://huggingface.co/spaces/Lakonik/pi-Qwen)] [[pi-FLUX Demo🤗](https://huggingface.co/spaces/Lakonik/pi-FLUX.1)] 
+[arXiv](https://arxiv.org/abs/2510.14974) | [ComfyUI](https://github.com/Lakonik/ComfyUI-piFlow) | [pi-Qwen Demo🤗](https://huggingface.co/spaces/Lakonik/pi-Qwen) | [pi-FLUX Demo🤗](https://huggingface.co/spaces/Lakonik/pi-FLUX.1)
 
 <img src="assets/stanford_adobe_logos.png" width="400" alt=""/>
 
