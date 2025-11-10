@@ -16,6 +16,7 @@ class DXPolicy(BasePolicy):
         sigma_t_src (torch.Tensor): The initial noise level. Shape (B,).
         segment_size (float): The size of each DX policy time segment. Defaults to 1.0.
         shift (float): The shift parameter for the DX policy noise schedule. Defaults to 1.0.
+        mode (str): Either 'grid' or 'polynomial' mode for calculating x_0. Defaults to 'grid'.
         eps (float): A small value to avoid numerical issues. Defaults to 1e-4.
     """
 
@@ -26,11 +27,15 @@ class DXPolicy(BasePolicy):
             sigma_t_src: torch.Tensor,
             segment_size: float = 1.0,
             shift: float = 1.0,
+            mode: str = 'grid',
             eps: float = 1e-4):
         self.x_t_src = x_t_src
         self.ndim = x_t_src.dim()
         self.shift = shift
         self.eps = eps
+
+        assert mode in ['grid', 'polynomial']
+        self.mode = mode
 
         self.sigma_t_src = sigma_t_src.reshape(*sigma_t_src.size(), *((self.ndim - sigma_t_src.dim()) * [1]))
         self.raw_t_src = self._unwarp_t(self.sigma_t_src)
@@ -81,8 +86,17 @@ class DXPolicy(BasePolicy):
         """
         sigma_t = sigma_t.reshape(*sigma_t.size(), *((self.ndim - sigma_t.dim()) * [1]))
         raw_t = self._unwarp_t(sigma_t)
-        x_0 = self._interpolate(
-            self.denoising_output_x_0, (raw_t - self.raw_t_dst) / self.segment_size)
+        if self.mode == 'grid':
+            x_0 = self._interpolate(
+                self.denoising_output_x_0, (raw_t - self.raw_t_dst) / self.segment_size)
+        elif self.mode == 'polynomial':
+            p_order = self.denoising_output_x_0.size(1)
+            diff_t = self.raw_t_src - raw_t  # (B, 1, 1, 1)
+            basis = torch.stack(
+                [diff_t ** i for i in range(p_order)], dim=1)  # (B, N, 1, 1, 1)
+            x_0 = torch.sum(basis * self.denoising_output_x_0, dim=1)
+        else:
+            raise ValueError(f"Unknown mode: {self.mode}")
         u = (x_t - x_0) / sigma_t.clamp(min=self.eps)
         return u
 
@@ -92,6 +106,7 @@ class DXPolicy(BasePolicy):
         new_policy.ndim = self.ndim
         new_policy.shift = self.shift
         new_policy.eps = self.eps
+        new_policy.mode = self.mode
         new_policy.sigma_t_src = self.sigma_t_src
         new_policy.raw_t_src = self.raw_t_src
         new_policy.raw_t_dst = self.raw_t_dst
