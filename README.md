@@ -194,6 +194,11 @@ dict(
 )
 ```
 
+To export a model checkpoint to diffusers safetensors for inference, run the following command after training:
+```bash
+python tools/export_piflow_to_diffusers.py <PATH_TO_CONFIG> --ckpt <PATH_TO_CKPT> --out-dir <OUTPUT_DIR>
+```
+
 ## Essential Code
 
 - Training
