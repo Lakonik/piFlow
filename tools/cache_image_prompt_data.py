@@ -11,6 +11,7 @@ warnings.filterwarnings(
 import os
 import argparse
 import multiprocessing as mp
+import platform
 import re
 import warnings
 
@@ -18,6 +19,7 @@ import pickle
 import zstandard as zstd
 import gzip
 import orjson
+import cv2
 import torch
 import torch.nn as nn
 import torch.distributed as dist
@@ -138,6 +140,38 @@ def save_cache(data, cache_path):
     file_client.put(bytesio.getvalue(), cache_path)
 
 
+def setup_multi_processes(cfg):
+    # set multi-process start method as `fork` to speed up the training
+    if platform.system() != 'Windows':
+        mp_start_method = cfg.get('mp_start_method', 'fork')
+        mp.set_start_method(mp_start_method)
+
+    # disable opencv multithreading to avoid system being overloaded
+    opencv_num_threads = cfg.get('opencv_num_threads', 0)
+    cv2.setNumThreads(opencv_num_threads)
+
+    # setup OMP threads
+    # This code is referred from https://github.com/pytorch/pytorch/blob/master/torch/distributed/run.py  # noqa
+    if ('OMP_NUM_THREADS' not in os.environ and cfg.data.workers_per_gpu > 1):
+        omp_num_threads = 1
+        warnings.warn(
+            f'Setting OMP_NUM_THREADS environment variable for each process '
+            f'to be {omp_num_threads} in default, to avoid your system being '
+            f'overloaded, please further tune the variable for optimal '
+            f'performance in your application as needed.')
+        os.environ['OMP_NUM_THREADS'] = str(omp_num_threads)
+
+    # setup MKL threads
+    if 'MKL_NUM_THREADS' not in os.environ and cfg.data.workers_per_gpu > 1:
+        mkl_num_threads = 1
+        warnings.warn(
+            f'Setting MKL_NUM_THREADS environment variable for each process '
+            f'to be {mkl_num_threads} in default, to avoid your system being '
+            f'overloaded, please further tune the variable for optimal '
+            f'performance in your application as needed.')
+        os.environ['MKL_NUM_THREADS'] = str(mkl_num_threads)
+
+
 def main():
     args = parse_args()
 
@@ -145,6 +179,8 @@ def main():
     if args.text_encoder is not None:
         cfg.model.text_encoder = Config.fromfile(args.text_encoder).model.text_encoder
     assert hasattr(cfg.model, 'text_encoder')
+
+    setup_multi_processes(cfg)
 
     # import modules from string list.
     if cfg.get('custom_imports', None):
@@ -208,16 +244,13 @@ def main():
 
     for dataset_name, dataset in data_dict.items():
         data_root = dataset['data_root']
-        cache_dir_path = os.path.join(data_root, dataset['cache_dir'])
-        cache_datalist_path = dataset['cache_datalist_path']
-        if FileClient.infer_client(uri=cache_datalist_path).isfile(cache_datalist_path):
-            continue  # already cached
+        root_file_client = FileClient.infer_client(uri=data_root)
+        cache_dir_path = root_file_client.join_path(data_root, dataset['cache_dir'])
 
-        if rank == 0:
-            os.makedirs(cache_dir_path, exist_ok=True)
-            os.makedirs(os.path.dirname(cache_datalist_path), exist_ok=True)
-        if world_size > 1:
-            dist.barrier()
+        cache_datalist_path = dataset['cache_datalist_path']
+        datalist_file_client = FileClient.infer_client(uri=cache_datalist_path)
+        if datalist_file_client.isfile(cache_datalist_path):
+            continue  # already cached
 
         # disable slicing and repeat
         for key in ['start_ind', 'end_ind', 'repeat']:
@@ -272,6 +305,8 @@ def main():
             mp_context=mp_ctx)
         cap = max_save_cache_workers * 2
         pending = set()
+
+        torch.set_grad_enabled(False)
 
         if rank == 0:
             pbar = tqdm(total=max_num, desc=f'Caching {dataset_name} data')
@@ -345,8 +380,7 @@ def main():
             else:
                 raise ValueError('Datalist file must be .jsonl, .jsonl.gz or .json')
 
-            FileClient.infer_client(uri=cache_datalist_path).put(
-                bytesio.getvalue(), cache_datalist_path)
+            datalist_file_client.put(bytesio.getvalue(), cache_datalist_path)
             logger.info(f'Wrote datalist to {cache_datalist_path}')
 
     return

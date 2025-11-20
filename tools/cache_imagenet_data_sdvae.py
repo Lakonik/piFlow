@@ -15,13 +15,15 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 import itertools
-import shutil
 import argparse
+import multiprocessing as mp
 import torch
 import torch.distributed as dist
 import mmcv
 
+from io import BytesIO
 from mmcv.runner import get_dist_info, init_dist
+from mmcv.fileio import FileClient
 from mmgen.apis import set_random_seed
 
 from lakonlab.datasets import ImageNet, build_dataloader
@@ -45,6 +47,8 @@ if __name__ == '__main__':
         help='whether to set deterministic options for CUDNN backend.')
     args = parser.parse_args()
 
+    mp.set_start_method('fork')
+
     init_dist('pytorch')
     rank, ws = get_dist_info()
 
@@ -61,20 +65,13 @@ if __name__ == '__main__':
 
     dataloader = build_dataloader(
         dataset, args.batch_size, 8,
-        persistent_workers=True, prefetch_factor=args.batch_size / 4, dist=True, shuffle=False)
+        persistent_workers=True, prefetch_factor=max(1, args.batch_size // 4), dist=True, shuffle=False)
 
     encoder = PretrainedVAEEncoder(
         from_pretrained='stabilityai/sd-vae-ft-ema', torch_dtype=args.dtype).eval().cuda()
 
-    if rank == 0:
-        if os.path.exists(args.out_data_root):
-            for file in os.listdir(args.out_data_root):
-                shutil.rmtree(os.path.join(args.out_data_root, file))
-        if os.path.exists(args.out_datalist_path):
-            os.remove(args.out_datalist_path)
-        os.makedirs(args.out_data_root, exist_ok=True)
-        os.makedirs(os.path.dirname(args.out_datalist_path), exist_ok=True)
-    dist.barrier()
+    root_file_client = FileClient.infer_client(uri=args.out_data_root)
+    datalist_file_client = FileClient.infer_client(uri=args.out_datalist_path)
 
     torch.set_grad_enabled(False)
 
@@ -89,11 +86,16 @@ if __name__ == '__main__':
         latents = encoder(images * 2 - 1)
 
         for latent, label, path in zip(latents, labels, list(itertools.chain.from_iterable(paths.data))):
-            out_path = os.path.join(
-                os.path.dirname(path), os.path.splitext(os.path.basename(path))[0] + '.pth')
-            os.makedirs(os.path.join(args.out_data_root, os.path.dirname(out_path)), exist_ok=True)
+            out_path = root_file_client.join_path(
+                os.path.dirname(path),
+                os.path.splitext(os.path.basename(path))[0] + '.pth'
+            )
             torch_data = dict(x=latent.cpu(), y=label.cpu())
-            torch.save(torch_data, os.path.join(args.out_data_root, out_path))
+            bytesio = BytesIO()
+            torch.save(torch_data, bytesio)
+            root_file_client.put(
+                bytesio.getvalue(),
+                root_file_client.join_path(args.out_data_root, out_path))
 
         if rank == 0:
             pbar.update(args.batch_size * ws)
@@ -101,10 +103,12 @@ if __name__ == '__main__':
     dist.barrier()
 
     if rank == 0:
-        with open(args.out_datalist_path, 'w') as f:
-            for label, path in zip(dataset.all_labels, dataset.all_paths):
-                out_path = os.path.join(
-                    os.path.dirname(path), os.path.splitext(os.path.basename(path))[0] + '.pth')
-                assert os.path.exists(os.path.join(args.out_data_root, out_path))
-                f.write(f'{out_path} {label:d}\n')
+        lines = []
+        for label, path in zip(dataset.all_labels, dataset.all_paths):
+            out_path = root_file_client.join_path(
+                os.path.dirname(path),
+                os.path.splitext(os.path.basename(path))[0] + '.pth'
+            )
+            lines.append(f'{out_path} {label:d}\n')
+        datalist_file_client.put_text(''.join(lines), args.out_datalist_path)
         print('Done!')
