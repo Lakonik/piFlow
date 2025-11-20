@@ -49,7 +49,7 @@ The code has been tested in the following environment:
 - Linux (tested on Ubuntu 20 and above)
 - [PyTorch](https://pytorch.org/get-started/previous-versions/) 2.6
 
-With the above prerequisites, run `pip install -e .` from the repository root to install the LakonLab codebase and its dependencies.
+With the above prerequisites, run `pip install -e . --no-build-isolation` from the repository root to install the LakonLab codebase and its dependencies.
 
 An example of installation commands is shown below:
 
@@ -64,7 +64,7 @@ pip install torch==2.6.0 torchvision==0.21.0
 # Move to this repository (the folder with setup.py) after cloning
 cd <PATH_TO_YOUR_LOCAL_REPO>
 # Install LakonLab in editable mode
-pip install -e .
+pip install -e . --no-build-isolation
 ```
 
 Additional notes:
