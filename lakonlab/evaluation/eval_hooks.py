@@ -241,6 +241,7 @@ class GenerativeEvalHook(_GenerativeEvalHook):
 
     def __init__(self,
                  *args,
+                 metrics=None,
                  data='',
                  viz_dir=None,
                  feed_batch_size=32,
@@ -249,7 +250,9 @@ class GenerativeEvalHook(_GenerativeEvalHook):
                  prefix='',
                  metric_cpu_offload=False,
                  **kwargs):
-        super(GenerativeEvalHook, self).__init__(*args, **kwargs)
+        if metrics is None:
+            metrics = []
+        super(GenerativeEvalHook, self).__init__(*args, metrics=metrics, **kwargs)
         self.data = data
         self.viz_dir = viz_dir
         self.file_client = FileClient.infer_client(

@@ -225,8 +225,13 @@ class ImagePrompt(Dataset):
                     else:
                         raise ValueError('No valid key to identify data item.')
                     if self.bucketize:
-                        assert 'size_idx' in data_item, 'size_idx must be provided for bucketize.'
-                        bucket_ids.append(data_item['size_idx'])
+                        if 'size_idx' in data_item:
+                            bucket_ids.append(data_item['size_idx'])
+                        elif 'bucket_id' in data_item:
+                            bucket_ids.append(data_item['bucket_id'])
+                        else:
+                            raise ValueError(
+                                'Either `size_idx` or `bucket_id` must be present in datalist for bucketize.')
             elif datalist_path.endswith('.json'):
                 assert not self.bucketize, 'Bucketize not supported for json datalist.'
                 datalist = orjson.loads(datalist_bytesio.read())

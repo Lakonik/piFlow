@@ -383,6 +383,9 @@ def main():
             datalist_file_client.put(bytesio.getvalue(), cache_datalist_path)
             logger.info(f'Wrote datalist to {cache_datalist_path}')
 
+        if world_size > 1:
+            dist.barrier()
+
     return
 
 
