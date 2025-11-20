@@ -42,7 +42,19 @@ where `<PATH_TO_CONFIG>` can be one of the following:
 
 To enable FSDP evaluation, please add `'./_fsdp_test.py'` to the `_base_` list in the corresponding config file.
 
-To evaluate a custom checkpoint, add the `--ckpt <PATH_TO_CKPT>` argument:
+To evaluate a custom checkpoint instead of the official model, we provide two options.
+
+*Option A.*
+
+Run the export script to convert the checkpoint to diffusers safetensors:
+```bash
+python tools/export_piflow_to_diffusers.py <PATH_TO_CONFIG> --ckpt <PATH_TO_CKPT> --out-dir <OUTPUT_DIR>
+```
+Then, modify the test config file to set `pretrained_adapter` to `<OUTPUT_DIR>/diffusion_pytorch_model.safetensors`. Finally, run the evaluation command as above.
+
+*Option B.*
+
+Copy the `use_lora`, `lora_target_modules`, and `lora_rank` settings from the train config file to the test config file, and then run the evaluation command with an additional `--ckpt <PATH_TO_CKPT>` argument:
 ```bash
 torchrun --nnodes=1 --nproc_per_node=8 tools/test.py <PATH_TO_CONFIG> --ckpt <PATH_TO_CKPT> --launcher pytorch --diff_seed
 ```
