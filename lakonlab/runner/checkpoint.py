@@ -264,11 +264,7 @@ def load_from_huggingface(filename, map_location=None):
                 subfolder=repo_subfolder)[0]
         ckpt = OrderedDict()
         for sharded_cached_file in sharded_cached_files:
-            ext = os.path.splitext(sharded_cached_file)[-1].lower()
-            if ext == '.safetensors':
-                ckpt.update(load_file(sharded_cached_file, device=map_location))
-            else:
-                ckpt.update(torch.load(sharded_cached_file, map_location=map_location))
+            ckpt.update(load_from_local(sharded_cached_file, map_location))
         return ckpt
     else:
         ext = os.path.splitext(cached_file)[-1].lower()
@@ -283,15 +279,23 @@ def load_from_local(filename, map_location=None):
     filename = osp.expanduser(filename)
     if not osp.isfile(filename):
         raise FileNotFoundError(f'{filename} can not be found.')
-    ext = os.path.splitext(filename)[-1].lower()
-    if ext == '.safetensors':
-        with open(filename, "rb") as f:  # load_file may fail with FUSE/NFS mmap
-            ckpt = load(f.read())
-            if map_location is not None:
-                for k in ckpt:
-                    ckpt[k] = ckpt[k].to(map_location)
+    if filename.endswith('.index.json'):  # sharded checkpoint
+        sharded_cached_files = _get_checkpoint_shard_files(
+            os.path.dirname(filename),
+            filename)[0]
+        ckpt = OrderedDict()
+        for sharded_cached_file in sharded_cached_files:
+            ckpt.update(load_from_local(sharded_cached_file, map_location))
     else:
-        ckpt = torch.load(filename, map_location=map_location)
+        ext = os.path.splitext(filename)[-1].lower()
+        if ext == '.safetensors':
+            with open(filename, "rb") as f:  # load_file may fail with FUSE/NFS mmap
+                ckpt = load(f.read())
+                if map_location is not None:
+                    for k in ckpt:
+                        ckpt[k] = ckpt[k].to(map_location)
+        else:
+            ckpt = torch.load(filename, map_location=map_location)
     return ckpt
 
 
@@ -496,6 +500,8 @@ def get_checkpoint(model,
                    fp16=False,
                    fp16_ema=False,
                    bf16_optim=False):
+    torch.cuda.empty_cache()
+
     if meta is None:
         meta = {}
     elif not isinstance(meta, dict):
@@ -517,6 +523,8 @@ def get_checkpoint(model,
             if ((fp16 and '_ema.' not in k and '_ema2.' not in k) or (fp16_ema and ('_ema.' in k or '_ema2.' in k))) \
                     and v.dtype == torch.float32:
                 checkpoint['state_dict'][k] = v.half()
+
+    torch.cuda.empty_cache()
 
     # save optimizer state dict in the checkpoint
     if isinstance(optimizer, Optimizer):

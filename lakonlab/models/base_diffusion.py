@@ -15,7 +15,8 @@ def train_fwd_bwd(model, args, kwargs, loss_scaler=None):
     is_multistep = rgetattr(model, 'is_multistep', False)
 
     if is_multistep:
-        step_states, log_vars = model(*args, return_step_states=True, **kwargs)
+        initialize_multistep = rgetattr(model, 'initialize_multistep')
+        step_states, log_vars = initialize_multistep(*args, **kwargs)
         loss = 0
         step_id = 0
         while not step_states['terminate']:

@@ -230,6 +230,11 @@ def evaluate(model, dataloader, metrics=None,
             write_html(html_path, html_entries, file_client)
         executor.shutdown(wait=True)
 
+    if enable_timers:
+        default_timers.print_all()
+        default_timers.reset_all()
+        default_timers.disable_all()
+
     return log_vars
 
 

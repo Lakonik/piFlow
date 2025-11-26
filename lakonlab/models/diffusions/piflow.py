@@ -326,7 +326,7 @@ class PiFlowImitationDataFree(PiFlowImitationBase):
 
     is_multistep = True
 
-    def forward_initialize(
+    def initialize_multistep(
             self, x_0, teacher=None, teacher_kwargs=dict(), running_status=None, **kwargs):
         device = get_module_device(self)
         num_batches = x_0.size(0)  # x_0 is a dummy input
@@ -402,9 +402,3 @@ class PiFlowImitationDataFree(PiFlowImitationBase):
             step_states.update(terminate=True)
 
         return loss, log_vars, step_states
-
-    def forward(self, x_0=None, return_step_states=False, **kwargs):
-        if return_step_states:
-            return self.forward_initialize(x_0=x_0, **kwargs)
-        else:
-            return super().forward(x_0=x_0, **kwargs)

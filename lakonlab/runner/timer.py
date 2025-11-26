@@ -10,6 +10,7 @@ import torch
 import mmcv
 from mmcv import Timer
 from mmgen.utils import get_root_logger
+from lakonlab.utils import reduce_mean
 
 
 class IterTimer:
@@ -46,7 +47,9 @@ class IterTimer:
         if not self.enabled:
             return
         logger = get_root_logger()
-        mmcv.print_log(f'Average {self.name} = {np.average(self.times):.4f}', logger=logger)
+        avg_time = np.average(self.times)
+        avg_time = reduce_mean(torch.tensor(avg_time).cuda()).item()
+        mmcv.print_log(f'Average {self.name} = {avg_time:.4f}', logger=logger)
 
     def reset(self):
         self.times = []
@@ -67,6 +70,14 @@ class IterTimers(dict):
     def add_timer(self, name='time', sync=True, enabled=False):
         self[name] = IterTimer(
             name, sync=sync, enabled=enabled)
+
+    def print_all(self):
+        for timer in self.values():
+            timer.print_time()
+
+    def reset_all(self):
+        for timer in self.values():
+            timer.reset()
 
 
 default_timers = IterTimers()
