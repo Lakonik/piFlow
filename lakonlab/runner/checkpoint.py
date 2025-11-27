@@ -25,7 +25,7 @@ from diffusers.utils.hub_utils import _get_checkpoint_shard_files
 from mmcv.runner import CheckpointLoader, get_dist_info, _load_checkpoint
 from mmcv.parallel import is_module_wrapper
 from lakonlab.utils import download_from_huggingface, rgetattr
-from lakonlab.utils.io_utils import S3Backend, TMP_DIR
+from lakonlab.utils.io_utils import S3Backend, TMP_DIR, retry
 from lakonlab.parallel import FSDP2Wrapper
 
 
@@ -142,6 +142,7 @@ def exists_ckpt(filename):
 
 
 @CheckpointLoader.register_scheme(prefixes='s3://', force=True)
+@retry()
 def load_from_s3(filename, map_location=None):
     ext = os.path.splitext(filename)[-1].lower()
 
@@ -197,6 +198,7 @@ def load_from_s3(filename, map_location=None):
 
 
 @CheckpointLoader.register_scheme(prefixes='tmp:')
+@retry()
 def load_from_tmp(filename, map_location=None):
     src_file = filename[4:]
     assert os.path.exists(src_file)
@@ -239,6 +241,7 @@ def load_from_tmp(filename, map_location=None):
 
 
 @CheckpointLoader.register_scheme(prefixes='huggingface://')
+@retry()
 def load_from_huggingface(filename, map_location=None):
     cached_file = download_from_huggingface(filename)
     if cached_file.endswith('.index.json'):  # sharded checkpoint
@@ -275,6 +278,7 @@ def load_from_huggingface(filename, map_location=None):
 
 
 @CheckpointLoader.register_scheme(prefixes='', force=True)
+@retry()
 def load_from_local(filename, map_location=None):
     filename = osp.expanduser(filename)
     if not osp.isfile(filename):
