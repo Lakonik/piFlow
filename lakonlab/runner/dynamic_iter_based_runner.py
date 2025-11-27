@@ -21,25 +21,6 @@ _last_save_thread: threading.Thread | None = None
 _last_save_lock = threading.Lock()        # protects _last_save_thread
 
 
-def strip_initial_lr(opt_state: Dict[str, Any]) -> Dict[str, Any]:
-
-    def _strip_in_single_optimizer(sd: Dict[str, Any]) -> None:
-        for group in sd.get("param_groups", []):
-            group.pop("initial_lr", None)
-
-    # case 1: top‑level looks like a regular optimizer state‑dict
-    if "param_groups" in opt_state:
-        _strip_in_single_optimizer(opt_state)
-        return opt_state
-
-    # case 2: multi‑optimizer checkpoint  {name -> state‑dict}
-    for key, sub_sd in opt_state.items():
-        if isinstance(sub_sd, dict) and "param_groups" in sub_sd:
-            _strip_in_single_optimizer(sub_sd)
-
-    return opt_state
-
-
 @RUNNERS.register_module()
 class DynamicIterBasedRunnerMod(DynamicIterBasedRunner):
     
@@ -189,12 +170,11 @@ class DynamicIterBasedRunnerMod(DynamicIterBasedRunner):
         self._inner_iter = checkpoint['meta']['iter']
 
         if 'optimizer' in checkpoint and resume_optimizer:
-            optimizer_sd = strip_initial_lr(checkpoint['optimizer'])
             if isinstance(self.optimizer, Optimizer):
                 set_optimizer_state_dict(
                     model=self.model,
                     optimizers=self.optimizer,
-                    optim_state_dict=optimizer_sd,
+                    optim_state_dict=checkpoint['optimizer'],
                     options=StateDictOptions(
                         full_state_dict=isinstance(self.model, FSDP),
                         broadcast_from_rank0=False))
@@ -204,7 +184,7 @@ class DynamicIterBasedRunnerMod(DynamicIterBasedRunner):
                     set_optimizer_state_dict(
                         model=m,
                         optimizers=self.optimizer[k],
-                        optim_state_dict=optimizer_sd[k],
+                        optim_state_dict=checkpoint['optimizer'][k],
                         options=StateDictOptions(
                             full_state_dict=isinstance(m, FSDP),
                             broadcast_from_rank0=False))
