@@ -303,14 +303,32 @@ def load_from_local(filename, map_location=None):
     return ckpt
 
 
+_checkpoint_cache = dict()
+
+
+def _load_cached_checkpoint(filename, map_location=None, logger=None):
+    cache_key = f'{filename}_{map_location}'
+
+    if cache_key in _checkpoint_cache:
+        return _checkpoint_cache[cache_key]
+
+    checkpoint = _load_checkpoint(filename, map_location, logger)
+    _checkpoint_cache[cache_key] = checkpoint
+    return checkpoint
+
+
 def load_checkpoint(model: torch.nn.Module,
                     filename: str,
                     map_location: Union[str, Callable, None] = None,
                     strict: bool = False,
                     logger: Optional[logging.Logger] = None,
                     revise_keys: list = [(r'^module\.', '')],
-                    assign: bool = False) -> Union[dict, OrderedDict]:
-    checkpoint = _load_checkpoint(filename, map_location, logger)
+                    assign: bool = False,
+                    use_cache=False) -> Union[dict, OrderedDict]:
+    if use_cache:
+        checkpoint = _load_cached_checkpoint(filename, map_location, logger)
+    else:
+        checkpoint = _load_checkpoint(filename, map_location, logger)
     # OrderedDict is a subclass of dict
     if not isinstance(checkpoint, dict):
         raise RuntimeError(
@@ -345,6 +363,10 @@ def load_checkpoint(model: torch.nn.Module,
     else:  # FSDP1, DDP, or non-distributed model
         load_full_state_dict(model, state_dict, strict, logger, assign)
     return checkpoint
+
+
+def clear_checkpoint_cache():
+    _checkpoint_cache.clear()
 
 
 def _save_to_state_dict(module, destination, prefix, keep_vars, trainable_only=False, cpu_offload=False):

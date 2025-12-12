@@ -16,7 +16,7 @@ from peft import LoraConfig
 from mmcv.cnn import constant_init, xavier_init
 from mmgen.models.builder import MODULES
 from mmgen.utils import get_root_logger
-from lakonlab.runner.checkpoint import _load_checkpoint, load_full_state_dict
+from lakonlab.runner.checkpoint import _load_cached_checkpoint, load_full_state_dict
 from ..utils import flex_freeze
 from .gm_output import GMFlowModelOutput
 
@@ -317,7 +317,7 @@ class GMFluxTransformer2DModel(_GMFluxTransformer2DModel):
         super().init_weights()
         if pretrained is not None:
             logger = get_root_logger()
-            checkpoint = _load_checkpoint(pretrained, map_location='cpu', logger=logger)
+            checkpoint = _load_cached_checkpoint(pretrained, map_location='cpu', logger=logger)
             if 'state_dict' in checkpoint:
                 state_dict = checkpoint['state_dict']
             else:
@@ -343,7 +343,7 @@ class GMFluxTransformer2DModel(_GMFluxTransformer2DModel):
                 self.proj_out_logstds[-1].bias.data = torch.full_like(
                     self.proj_out_logstds[-1].bias.data, np.log(0.05))  # reduce the initial logstd
             if pretrained_adapter is not None:
-                adapter_state_dict = _load_checkpoint(
+                adapter_state_dict = _load_cached_checkpoint(
                     pretrained_adapter, map_location='cpu', logger=logger)
                 lora_state_dict = dict()
                 for k, v in adapter_state_dict.items():

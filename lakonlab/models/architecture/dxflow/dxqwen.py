@@ -6,7 +6,7 @@ from peft import LoraConfig
 from mmgen.models.builder import MODULES
 from mmgen.utils import get_root_logger
 from ..utils import flex_freeze
-from lakonlab.runner.checkpoint import _load_checkpoint, load_full_state_dict
+from lakonlab.runner.checkpoint import _load_cached_checkpoint, load_full_state_dict
 
 
 @MODULES.register_module()
@@ -76,7 +76,7 @@ class DXQwenImageTransformer2DModel(QwenImageTransformer2DModel):
     def init_weights(self, pretrained=None, pretrained_adapter=None, mode='grid'):
         if pretrained is not None:
             logger = get_root_logger()
-            checkpoint = _load_checkpoint(pretrained, map_location='cpu', logger=logger)
+            checkpoint = _load_cached_checkpoint(pretrained, map_location='cpu', logger=logger)
             if 'state_dict' in checkpoint:
                 state_dict = checkpoint['state_dict']
             else:
@@ -111,7 +111,7 @@ class DXQwenImageTransformer2DModel(QwenImageTransformer2DModel):
             else:
                 raise ValueError(f"Unknown mode: {mode}")
             if pretrained_adapter is not None:
-                adapter_state_dict = _load_checkpoint(
+                adapter_state_dict = _load_cached_checkpoint(
                     pretrained_adapter, map_location='cpu', logger=logger)
                 lora_state_dict = dict()
                 for k, v in adapter_state_dict.items():

@@ -43,13 +43,13 @@ class ContinuousTimeStepSampler:
             shift = self.shift
         return shift
 
-    def warp_t(self, t, seq_len=None):
+    def warp_t(self, raw_t, seq_len=None):
         shift = self.get_shift(seq_len=seq_len)
-        return shift * t / (1 + (shift - 1) * t)
+        return shift * raw_t / (1 + (shift - 1) * raw_t)
 
-    def unwarp_t(self, t, seq_len=None):
+    def unwarp_t(self, sigma_t, seq_len=None):
         shift = self.get_shift(seq_len=seq_len)
-        return t / (shift + (1 - shift) * t)
+        return sigma_t / (shift + (1 - shift) * sigma_t)
 
     def sample(self, batch_size, warp_t=True, scale_t=True, seq_len=None,
                raw_t_range=None, device=None):

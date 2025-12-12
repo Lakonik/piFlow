@@ -132,6 +132,31 @@ def tie_untrained_submodules(tgt_module, src_module, tie_tgt_lora_base_layer=Fal
                         tgt_module._modules[key], src_submodule, tie_tgt_lora_base_layer)
 
 
+def untie_all_parameters(tgt_module, src_module, recursive=True, untie_tgt_lora_base_layer=False):
+    for key, val in src_module._parameters.items():
+        if val is not None \
+                and tgt_module._parameters.get(key, None) is not None \
+                and tgt_module._parameters[key].data is val.data:
+            tgt_module._parameters[key] = tgt_module._parameters[key].clone()
+    for key, val in src_module._buffers.items():
+        if key in tgt_module._buffers \
+                and tgt_module._buffers[key].data is val.data:
+            tgt_module._buffers[key] = tgt_module._buffers[key].clone()
+    if recursive:
+        for key, val in src_module._modules.items():
+            if key in tgt_module._modules:
+                if untie_tgt_lora_base_layer \
+                        and isinstance(tgt_module._modules[key], LoraLayer) \
+                        and not isinstance(val, LoraLayer):
+                    untie_all_parameters(
+                        tgt_module._modules[key]._modules['base_layer'], val,
+                        recursive=True, untie_tgt_lora_base_layer=untie_tgt_lora_base_layer)
+                else:
+                    untie_all_parameters(
+                        tgt_module._modules[key], val,
+                        recursive=True, untie_tgt_lora_base_layer=untie_tgt_lora_base_layer)
+
+
 def clone_params(tgt_module, src_module, recursive=True):
     """Clone parameters and buffers from src_module to tgt_module (sharing the same structure).
     Tied parameters/buffers are not cloned. Used for EMA model initialization.

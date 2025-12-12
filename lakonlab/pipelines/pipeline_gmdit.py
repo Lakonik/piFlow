@@ -35,7 +35,7 @@ class GMDiTPipeline(DiTPipeline, GMFlowMixin):
                     self.labels[label.lstrip().rstrip()] = int(key)
             self.labels = dict(sorted(self.labels.items()))
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def __call__(
         self,
         class_labels: List[int],

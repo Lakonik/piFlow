@@ -268,6 +268,14 @@ class GenerativeEvalHook(_GenerativeEvalHook):
         self.prefix = prefix
         self.metric_cpu_offload = metric_cpu_offload
 
+    def before_run(self, runner):
+        super().before_run(runner)
+        # force worker creation EARLY, without consuming a batch
+        if (getattr(self.dataloader, 'num_workers', 0) > 0
+                and getattr(self.dataloader, 'persistent_workers', False)):
+            runner.logger.info('Warming up dataloader workers for GenerativeEvalHook...')
+            _ = iter(self.dataloader)  # spawns workers, no data consumed
+
     @torch.no_grad()
     def after_train_iter(self, runner):
         with gc_context(enable=True):

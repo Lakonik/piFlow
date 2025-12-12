@@ -37,6 +37,7 @@ from mmgen.models import build_model
 from mmgen.utils import collect_env, get_root_logger
 
 from lakonlab.apis import train_model
+from lakonlab.runner.checkpoint import clear_checkpoint_cache
 from lakonlab import __version__
 
 cv2.setNumThreads(0)
@@ -229,6 +230,7 @@ def main():
 
     model = build_model(
         cfg.model, train_cfg=cfg.train_cfg, test_cfg=cfg.test_cfg)
+    clear_checkpoint_cache()
 
     datasets = [build_dataset(cfg.data.train)]
     if len(cfg.workflow) == 2:

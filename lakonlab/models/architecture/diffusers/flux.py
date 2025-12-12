@@ -7,7 +7,7 @@ from peft import LoraConfig
 from mmgen.models.builder import MODULES
 from mmgen.utils import get_root_logger
 from ..utils import flex_freeze
-from lakonlab.runner.checkpoint import load_checkpoint, _load_checkpoint
+from lakonlab.runner.checkpoint import load_checkpoint, _load_cached_checkpoint
 
 
 @MODULES.register_module()
@@ -66,7 +66,8 @@ class FluxTransformer2DModel(_FluxTransformer2DModel):
         if pretrained is not None:
             logger = get_root_logger()
             load_checkpoint(
-                self, pretrained, map_location='cpu', strict=False, logger=logger, assign=True)
+                self, pretrained,
+                map_location='cpu', strict=False, logger=logger, assign=True, use_cache=True)
             if pretrained_lora is not None:
                 if not isinstance(pretrained_lora, (list, tuple)):
                     assert isinstance(pretrained_lora, str)
@@ -75,7 +76,7 @@ class FluxTransformer2DModel(_FluxTransformer2DModel):
                     assert isinstance(pretrained_lora_scale, (int, float))
                     pretrained_lora_scale = [pretrained_lora_scale]
                 for pretrained_lora_single, pretrained_lora_scale_single in zip(pretrained_lora, pretrained_lora_scale):
-                    lora_state_dict = _load_checkpoint(
+                    lora_state_dict = _load_cached_checkpoint(
                         pretrained_lora_single, map_location='cpu', logger=logger)
                     self.load_lora_adapter(lora_state_dict)
                     self.fuse_lora(lora_scale=pretrained_lora_scale_single)

@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from io import BytesIO
 from functools import wraps
-from typing import Generator, Union
+from typing import Generator, Union, Optional, Tuple
 from PIL import Image
 from boto3.s3.transfer import TransferConfig
 from botocore import UNSIGNED
@@ -263,7 +263,12 @@ class S3Backend(BaseStorageBackend):
     def list_dir_or_file(
             self,
             dir_path: Union[str, Path],
+            list_dir: bool = True,
+            list_file: bool = True,
+            suffix: Optional[Union[str, Tuple[str]]] = None,
             recursive: bool = False):
+        assert list_dir and list_file and suffix is None
+
         dir_path = str(dir_path)
         if not dir_path.endswith('/'):
             dir_path += '/'
@@ -321,7 +326,18 @@ def save_video(video, filepath, file_client, fps=16, quality=5, bitrate=None, ma
     file_client.put(img_byte_arr, filepath)
 
 
-def load_image(filepath, file_client):
+def resize_and_crop(image: Image, target_hw: tuple[int, int]):
+    tgt_h, tgt_w = target_hw
+    w, h = image.size
+    scale = max(tgt_h / h, tgt_w / w)
+    new_h, new_w = round(h * scale), round(w * scale)
+    if new_h != h or new_w != w:
+        image = image.resize((new_w, new_h), Image.LANCZOS)
+    left, top = (new_w - tgt_w) // 2, (new_h - tgt_h) // 2
+    return image.crop((left, top, left + tgt_w, top + tgt_h)), scale
+
+
+def load_image(filepath, file_client, target_size=None):
     img_bytes = file_client.get(filepath)
     extension = os.path.splitext(filepath)[-1].lower()
     arr = imageio.v3.imread(BytesIO(img_bytes), extension=extension)  # (H,W,C) or (H,W)
@@ -329,6 +345,11 @@ def load_image(filepath, file_client):
         arr = np.stack([arr, arr, arr], axis=-1)
     if arr.shape[-1] == 4:  # RGBA -> RGB
         arr = arr[..., :3]
+    if target_size is not None:
+        assert arr.ndim == 3
+        pil = Image.fromarray(arr)
+        pil, _ = resize_and_crop(pil, target_size)
+        arr = np.asarray(pil)
     return arr
 
 
@@ -344,3 +365,30 @@ def load_images_parallel(filepaths, file_client):
             arr = fut.result()
             results[idx] = arr
     return results
+
+
+@retry()
+def hf_model_downloader(model_class, repo_id, **kwargs):
+    is_dist = dist.is_available() and dist.is_initialized()
+    if is_dist:
+        local_rank = dist.get_node_local_rank()
+    else:
+        local_rank = 0
+    if local_rank == 0:
+        model = model_class.from_pretrained(repo_id, **kwargs)
+    if is_dist:
+        dist.barrier()
+    if local_rank > 0:
+        model = model_class.from_pretrained(repo_id, **kwargs)
+    return model
+
+
+def hf_model_loader(model_class, repo_id, local_files_only=False, **kwargs):
+    try:
+        model = model_class.from_pretrained(repo_id, local_files_only=True, **kwargs)
+    except Exception as e:
+        if local_files_only:
+            raise e
+        else:
+            model = hf_model_downloader(model_class, repo_id, **kwargs)
+    return model

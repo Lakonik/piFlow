@@ -5,13 +5,13 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 import gradio as gr
-from diffusers import FlowMatchEulerDiscreteScheduler
+from lakonlab.models.diffusions.schedulers.flow_map_sde import FlowMapSDEScheduler
 from lakonlab.ui.gradio.create_text_to_img import create_interface_text_to_img
-from lakonlab.pipelines.piqwen_pipeline import PiQwenImagePipeline
+from lakonlab.pipelines.pipeline_piqwen import PiQwenImagePipeline
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='GM-Qwen Gradio Demo')
+    parser = argparse.ArgumentParser(description='pi-Qwen Gradio Demo')
     parser.add_argument('--share', action='store_true', help='Enable Gradio sharing')
     return parser.parse_args()
 
@@ -31,8 +31,8 @@ def main():
         'Lakonik/pi-Qwen-Image',
         subfolder='gmqwen_k8_piid_4step',
         target_module_name='transformer')
-    pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(  # use fixed shift=3.2
-        pipe.scheduler.config, shift=3.2, shift_terminal=None, use_dynamic_shifting=False)
+    pipe.scheduler = FlowMapSDEScheduler.from_config(  # use fixed shift=3.2
+        pipe.scheduler.config, shift=3.2, use_dynamic_shifting=False, final_step_size_scale=0.5)
     pipe = pipe.to('cuda')
 
     def generate(
@@ -48,7 +48,7 @@ def main():
 
     with gr.Blocks(analytics_enabled=False,
                    title='pi-Qwen Demo',
-                   css='lakonlab/ui/gradio/style.css'
+                   css_paths='lakonlab/ui/gradio/style.css'
                    ) as demo:
 
         md_txt = '# pi-Qwen Demo\n\n' \

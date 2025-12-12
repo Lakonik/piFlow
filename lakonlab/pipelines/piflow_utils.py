@@ -23,24 +23,41 @@ from diffusers.utils import (
     logging,
 )
 from diffusers.loaders.peft import _SET_ADAPTER_SCALE_FN_MAPPING
+from diffusers.quantizers import DiffusersAutoQuantizer
+from diffusers.utils.torch_utils import empty_device_cache
 from lakonlab.models.architecture.gmflow.gmflux import _GMFluxTransformer2DModel
 from lakonlab.models.architecture.gmflow.gmqwen import _GMQwenImageTransformer2DModel
+from lakonlab.models.architecture.gmflow.gmflux2 import _GMFlux2Transformer2DModel
 
 
 LOCAL_CLASS_MAPPING = {
     "GMFluxTransformer2DModel": _GMFluxTransformer2DModel,
     "GMQwenImageTransformer2DModel": _GMQwenImageTransformer2DModel,
+    "GMFlux2Transformer2DModel": _GMFlux2Transformer2DModel,
 }
 
 _SET_ADAPTER_SCALE_FN_MAPPING.update(
     _GMFluxTransformer2DModel=lambda model_cls, weights: weights,
     _GMQwenImageTransformer2DModel=lambda model_cls, weights: weights,
+    _GMFlux2Transformer2DModel=lambda model_cls, weights: weights,
 )
 
 logger = logging.get_logger(__name__)
 
 
-class PiFlowLoaderMixin:
+def assign_param(module, tensor_name: str, param: torch.nn.Parameter):
+    if "." in tensor_name:
+        splits = tensor_name.split(".")
+        for split in splits[:-1]:
+            new_module = getattr(module, split)
+            if new_module is None:
+                raise ValueError(f"{module} has no attribute {split}.")
+            module = new_module
+        tensor_name = splits[-1]
+    module._parameters[tensor_name] = param
+
+
+class PiFlowMixin:
 
     def load_piflow_adapter(
         self,
@@ -218,6 +235,9 @@ class PiFlowLoaderMixin:
                 user_agent=user_agent,
             )
 
+        assert model_file is not None, \
+            f"Could not find adapter weights for {pretrained_model_name_or_path}."
+
         # 3. Initialize model
 
         base_module = getattr(self, target_module_name)
@@ -225,6 +245,68 @@ class PiFlowLoaderMixin:
         torch_dtype = base_module.dtype
         device = base_module.device
         dtype_orig = model_cls._set_default_torch_dtype(torch_dtype)
+
+        # load the state dict early to determine keep_in_fp32_modules
+        #######################################
+        overwrite_state_dict = dict()
+        lora_state_dict = dict()
+
+        adapter_state_dict = load_state_dict(model_file, disable_mmap=disable_mmap)
+        for k in adapter_state_dict.keys():
+            adapter_state_dict[k] = adapter_state_dict[k].to(dtype=torch_dtype, device=device)
+            if "lora" in k:
+                lora_state_dict[k.removeprefix(f"{target_module_name}.")] = adapter_state_dict[k]
+            else:
+                overwrite_state_dict[k.removeprefix(f"{target_module_name}.")] = adapter_state_dict[k]
+
+        # determine initial quantization config.
+        #######################################
+        pre_quantized = ("quantization_config" in base_module.config
+                         and base_module.config["quantization_config"] is not None)
+        if pre_quantized:
+            config["quantization_config"] = base_module.config.quantization_config
+            hf_quantizer = DiffusersAutoQuantizer.from_config(
+                config["quantization_config"], pre_quantized=True
+            )
+
+            hf_quantizer.validate_environment(torch_dtype=torch_dtype)
+            torch_dtype = hf_quantizer.update_torch_dtype(torch_dtype)
+
+            user_agent["quant"] = hf_quantizer.quantization_config.quant_method.value
+
+            # Force-set to `True` for more mem efficiency
+            if low_cpu_mem_usage is None:
+                low_cpu_mem_usage = True
+                logger.info("Set `low_cpu_mem_usage` to True as `hf_quantizer` is not None.")
+            elif not low_cpu_mem_usage:
+                raise ValueError("`low_cpu_mem_usage` cannot be False or None when using quantization.")
+
+        else:
+            hf_quantizer = None
+
+        # Check if `_keep_in_fp32_modules` is not None
+        use_keep_in_fp32_modules = model_cls._keep_in_fp32_modules is not None and (
+            hf_quantizer is None or getattr(hf_quantizer, "use_keep_in_fp32_modules", False)
+        )
+
+        if use_keep_in_fp32_modules:
+            keep_in_fp32_modules = model_cls._keep_in_fp32_modules
+            if not isinstance(keep_in_fp32_modules, list):
+                keep_in_fp32_modules = [keep_in_fp32_modules]
+
+            if low_cpu_mem_usage is None:
+                low_cpu_mem_usage = True
+                logger.info("Set `low_cpu_mem_usage` to True as `_keep_in_fp32_modules` is not None.")
+            elif not low_cpu_mem_usage:
+                raise ValueError("`low_cpu_mem_usage` cannot be False when `keep_in_fp32_modules` is True.")
+        else:
+            keep_in_fp32_modules = []
+
+        # append modules in overwrite_state_dict to keep_in_fp32_modules
+        for k in overwrite_state_dict.keys():
+            module_name = k.rsplit('.', 1)[0]
+            if module_name and module_name not in keep_in_fp32_modules:
+                keep_in_fp32_modules.append(module_name)
 
         init_contexts = [no_init_weights()]
 
@@ -236,40 +318,84 @@ class PiFlowLoaderMixin:
 
         torch.set_default_dtype(dtype_orig)
 
+        if hf_quantizer is not None:
+            hf_quantizer.preprocess_model(
+                model=piflow_module, device_map=None, keep_in_fp32_modules=keep_in_fp32_modules
+            )
+
         # 4. Load model weights
 
-        if model_file is not None:
-            base_state_dict = base_module.state_dict()
-            lora_state_dict = dict()
-
-            adapter_state_dict = load_state_dict(model_file, disable_mmap=disable_mmap)
-            for k in adapter_state_dict.keys():
-                adapter_state_dict[k] = adapter_state_dict[k].to(dtype=torch_dtype, device=device)
-                if "lora" in k:
-                    lora_state_dict[k.removeprefix(f"{target_module_name}.")] = adapter_state_dict[k]
-                else:
-                    base_state_dict[k.removeprefix(f"{target_module_name}.")] = adapter_state_dict[k]
-
-            if len(lora_state_dict) == 0:
-                adapter_name = None
-
+        base_state_dict = base_module.state_dict()
+        base_state_dict.update(overwrite_state_dict)
+        empty_state_dict = piflow_module.state_dict()
+        for param_name, param in base_state_dict.items():
+            if param_name not in empty_state_dict:
+                continue
+            if hf_quantizer is not None and (
+                    hf_quantizer.check_if_quantized_param(
+                        piflow_module, param, param_name, base_state_dict, param_device=device)):
+                hf_quantizer.create_quantized_param(
+                    piflow_module, param, param_name, device, base_state_dict, dtype=torch_dtype
+                )
             else:
-                if adapter_name is None:
-                    adapter_name = f"{target_module_name}_piflow"
+                assign_param(piflow_module, param_name, param)
 
-                piflow_module.load_state_dict(
-                    base_state_dict, strict=False, assign=True)
-                piflow_module.load_lora_adapter(
-                    lora_state_dict, prefix=None, adapter_name=adapter_name)
+        empty_device_cache()
 
-                setattr(self, target_module_name, piflow_module)
+        if hf_quantizer is not None:
+            hf_quantizer.postprocess_model(piflow_module)
+            piflow_module.hf_quantizer = hf_quantizer
 
-        else:
+        if len(lora_state_dict) == 0:
             adapter_name = None
-
+        else:
+            if adapter_name is None:
+                adapter_name = f"{target_module_name}_piflow"
+            piflow_module.load_lora_adapter(
+                lora_state_dict, prefix=None, adapter_name=adapter_name, low_cpu_mem_usage=low_cpu_mem_usage)
         if adapter_name is None:
             logger.warning(
                 f"No LoRA weights were found in {pretrained_model_name_or_path}."
             )
 
+        setattr(self, target_module_name, piflow_module)
+
         return adapter_name
+
+    def policy_rollout(
+            self,
+            x_t_start: torch.Tensor,  # (B, C, *, H, W)
+            sigma_t_start: torch.Tensor,
+            sigma_t_end: torch.Tensor,
+            total_substeps: int,
+            policy,
+            **kwargs):
+        assert sigma_t_start.numel() == 1 and sigma_t_end.numel() == 1, \
+            "Only supports scalar sigma_t_start and sigma_t_end."
+        raw_t_start = self.scheduler.unwarp_t(
+            sigma_t_start, **kwargs)
+        raw_t_end = self.scheduler.unwarp_t(
+            sigma_t_end, **kwargs)
+
+        delta_raw_t = raw_t_start - raw_t_end
+        num_substeps = (delta_raw_t * total_substeps).round().to(torch.long).clamp(min=1)
+        substep_size = delta_raw_t / num_substeps
+
+        raw_t = raw_t_start
+        sigma_t = sigma_t_start
+        x_t = x_t_start
+
+        for substep_id in range(num_substeps.item()):
+            u = policy.pi(x_t, sigma_t)
+
+            raw_t_minus = (raw_t - substep_size).clamp(min=0)
+            sigma_t_minus = self.scheduler.warp_t(raw_t_minus, **kwargs)
+            x_t_minus = x_t + u * (sigma_t_minus - sigma_t)
+
+            x_t = x_t_minus
+            sigma_t = sigma_t_minus
+            raw_t = raw_t_minus
+
+        x_t_end = x_t
+
+        return x_t_end

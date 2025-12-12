@@ -7,7 +7,7 @@ from accelerate import init_empty_weights
 from mmgen.models.builder import MODELS, build_module
 
 from .base import BaseModel
-from lakonlab.utils import clone_params, tie_untrained_submodules
+from lakonlab.utils import clone_params, tie_untrained_submodules, untie_all_parameters
 
 
 @MODELS.register_module()
@@ -35,6 +35,8 @@ class Diffusion2D(BaseModel):
                     self.diffusion_ema = build_module(diffusion_ema)
                 if tie_ema:
                     tie_untrained_submodules(self.diffusion_ema, self.diffusion)
+                else:
+                    untie_all_parameters(self.diffusion_ema, self.diffusion)
                 clone_params(self.diffusion_ema, self.diffusion)
 
         self.train_cfg = dict() if train_cfg is None else deepcopy(train_cfg)

@@ -197,16 +197,15 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
         rm_head_kwargs=None,
     ):
         super().__init__(config)
-        # pdb.set_trace()
         self.output_dim = output_dim
         if rm_head_type == "default":
-            self.rm_head = nn.Linear(config.hidden_size, output_dim, bias=False)
+            self.rm_head = nn.Linear(config.text_config.hidden_size, output_dim, bias=False)
         elif rm_head_type == "ranknet":
             if rm_head_kwargs is not None:
                 for layer in range(rm_head_kwargs.get("num_layers", 3)):
                     if layer == 0:
                         self.rm_head = nn.Sequential(
-                            nn.Linear(config.hidden_size, rm_head_kwargs["hidden_size"]),
+                            nn.Linear(config.text_config.hidden_size, rm_head_kwargs["hidden_size"]),
                             nn.ReLU(),
                             nn.Dropout(rm_head_kwargs.get("dropout", 0.1)),
                         )
@@ -227,7 +226,7 @@ class Qwen2VLRewardModelBT(Qwen2VLForConditionalGeneration):
 
             else:
                 self.rm_head = nn.Sequential(
-                    nn.Linear(config.hidden_size, 1024),
+                    nn.Linear(config.text_config.hidden_size, 1024),
                     nn.ReLU(),
                     nn.Dropout(0.05),
                     nn.Linear(1024, 16),

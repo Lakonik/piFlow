@@ -25,12 +25,11 @@ class LatentDiffusionClassImage(BaseDiffusion):
             latents = data['latents']
         elif 'images' in data:
             assert self.vae is not None, 'VAE must be provided for encoding images to latents.'
-            with torch.no_grad():
-                if hasattr(self.vae, 'dtype'):
-                    vae_dtype = self.vae.dtype
-                else:
-                    vae_dtype = next(self.vae.parameters()).dtype
-                latents = self.vae.encode((data['images'] * 2 - 1).to(vae_dtype)).float()
+            if hasattr(self.vae, 'dtype'):
+                vae_dtype = self.vae.dtype
+            else:
+                vae_dtype = next(self.vae.parameters()).dtype
+            latents = self.vae.encode((data['images'] * 2 - 1).to(vae_dtype)).float()
         else:
             raise ValueError('Either `latents` or `images` should be provided in the input data.')
 

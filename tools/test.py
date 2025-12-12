@@ -37,7 +37,7 @@ from mmgen.utils import get_root_logger
 from lakonlab.evaluation.eval_hooks import evaluate
 from lakonlab.datasets import build_dataloader
 from lakonlab.parallel import apply_module_wrapper
-from lakonlab.runner.checkpoint import exists_ckpt
+from lakonlab.runner.checkpoint import exists_ckpt, clear_checkpoint_cache
 
 _distributed_metrics = [
     'FID', 'IS', 'FIDKID', 'PR', 'InceptionMetrics', 'ColorStats', 'HPSv2', 'VQAScore', 'CLIPSimilarity', 'HPSv3']
@@ -211,6 +211,7 @@ def main():
     model = build_model(
         cfg.model, train_cfg=cfg.train_cfg, test_cfg=cfg.test_cfg)
     model.requires_grad_(False).eval()
+    clear_checkpoint_cache()
 
     if distributed:
         module_wrapper = cfg.get('module_wrapper', 'ddp')

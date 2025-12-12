@@ -41,65 +41,29 @@ def probabilistic_guidance_jit(
 
 
 @torch.jit.script
-def gmflow_posterior_jit(
-        sigma_t_src, sigma_t, x_t_src, x_t,
-        gm_means, gm_vars, gm_logstds, gm_logweights,
-        eps: float, gm_dim: int = -4, channel_dim: int = -3):
-    alpha_t_src = 1 - sigma_t_src
-    alpha_t = 1 - sigma_t
-
-    sigma_t_src_sq = sigma_t_src.square()
-    sigma_t_sq = sigma_t.square()
-
-    # compute gaussian params
-    denom = (alpha_t.square() * sigma_t_src_sq - alpha_t_src.square() * sigma_t_sq).clamp(min=eps)  # ζ
-    g_mean = (alpha_t * sigma_t_src_sq * x_t - alpha_t_src * sigma_t_sq * x_t_src) / denom  # ν / ζ
-    g_var = sigma_t_sq * sigma_t_src_sq / denom
-
-    # gm_mul_iso_gaussian
-    g_mean = g_mean.unsqueeze(gm_dim)  # (bs, *, 1, out_channels, h, w)
-    g_var = g_var.unsqueeze(gm_dim)  # (bs, *, 1, 1, 1, 1)
-    g_logstd = g_var.clamp(min=eps).log() / 2
-
-    gm_diffs = gm_means - g_mean  # (bs, *, num_gaussians, out_channels, h, w)
-    norm_factor = (g_var + gm_vars).clamp(min=eps)
-
-    out_means = (g_var * gm_means + gm_vars * g_mean) / norm_factor
-    # (bs, *, num_gaussians, 1, h, w)
-    logweights_delta = gm_diffs.square().sum(dim=channel_dim, keepdim=True) * (-0.5 / norm_factor)
-
-    out_logweights = (gm_logweights + logweights_delta).log_softmax(dim=gm_dim)
-    out_logstds = gm_logstds + g_logstd - 0.5 * torch.log(norm_factor)
-
-    return out_means, out_logstds, out_logweights
-
-
-@torch.jit.script
 def gmflow_posterior_mean_jit(
         sigma_t_src, sigma_t, x_t_src, x_t,
         gm_means, gm_vars, gm_logweights,
         eps: float, gm_dim: int = -4, channel_dim: int = -3):
+    sigma_t_src = sigma_t_src.clamp(min=eps)
+    sigma_t = sigma_t.clamp(min=eps)
+
     alpha_t_src = 1 - sigma_t_src
     alpha_t = 1 - sigma_t
 
-    sigma_t_src_sq = sigma_t_src.square()
-    sigma_t_sq = sigma_t.square()
+    alpha_over_sigma_t_src = alpha_t_src / sigma_t_src
+    alpha_over_sigma_t = alpha_t / sigma_t
 
-    # compute gaussian params
-    denom = (alpha_t.square() * sigma_t_src_sq - alpha_t_src.square() * sigma_t_sq).clamp(min=eps)  # ζ
-    g_mean = (alpha_t * sigma_t_src_sq * x_t - alpha_t_src * sigma_t_sq * x_t_src) / denom  # ν / ζ
-    g_var = sigma_t_sq * sigma_t_src_sq / denom
+    zeta = alpha_over_sigma_t.square() - alpha_over_sigma_t_src.square()
+    nu = alpha_over_sigma_t * x_t / sigma_t - alpha_over_sigma_t_src * x_t_src / sigma_t_src
 
-    # gm_mul_iso_gaussian
-    g_mean = g_mean.unsqueeze(gm_dim)  # (bs, *, 1, out_channels, h, w)
-    g_var = g_var.unsqueeze(gm_dim)  # (bs, *, 1, 1, 1, 1)
+    nu = nu.unsqueeze(gm_dim)  # (bs, *, 1, out_channels, h, w)
+    denom = (gm_vars * zeta + 1).clamp(min=eps)
 
-    gm_diffs = gm_means - g_mean  # (bs, *, num_gaussians, out_channels, h, w)
-    norm_factor = (g_var + gm_vars).clamp(min=eps)
-
-    out_means = (g_var * gm_means + gm_vars * g_mean) / norm_factor
+    out_means = (gm_vars * nu + gm_means) / denom
     # (bs, *, num_gaussians, 1, h, w)
-    logweights_delta = gm_diffs.square().sum(dim=channel_dim, keepdim=True) * (-0.5 / norm_factor)
+    logweights_delta = (gm_means * (nu - 0.5 * zeta * gm_means)).sum(
+        dim=channel_dim, keepdim=True) / denom
     out_weights = (gm_logweights + logweights_delta).softmax(dim=gm_dim)
 
     out_mean = (out_means * out_weights).sum(dim=gm_dim)

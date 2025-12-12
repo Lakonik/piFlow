@@ -1,5 +1,5 @@
 import gradio as gr
-from .shared_opts import create_base_opts, create_generate_bar, set_seed, create_prompt_opts
+from .shared_opts import create_base_opts, create_generate_bar, set_seed, create_prompt_opts, create_image_size_bar
 
 
 def create_interface_text_to_img(
@@ -10,23 +10,11 @@ def create_interface_text_to_img(
     var_dict = dict()
     with gr.Blocks(analytics_enabled=False) as interface:
         var_dict['output_image'] = gr.Image(
-            type='pil', image_mode='RGB', label='Output image', interactive=False, elem_classes=['vh-img'])
+            type='pil', image_mode='RGB', label='Output image', interactive=False, elem_classes=['vh-img', 'vh-img-700'])
         create_prompt_opts(var_dict, create_negative_prompt=create_negative_prompt, prompt=prompt)
         with gr.Column(variant='compact', elem_classes=['custom-spacing']):
-            with gr.Row(variant='compact', elem_classes=['force-hide-container']):
-                var_dict['width'] = gr.Slider(
-                    label='Width', minimum=64, maximum=2048, step=hw_slider_step, value=width,
-                    elem_classes=['force-hide-container'])
-                var_dict['switch_hw'] = gr.Button('\U000021C6', elem_classes=['tool'])
-                var_dict['height'] = gr.Slider(
-                    label='Height', minimum=64, maximum=2048, step=hw_slider_step, value=height,
-                    elem_classes=['force-hide-container'])
-                var_dict['switch_hw'].click(
-                    fn=lambda w, h: (h, w),
-                    inputs=[var_dict['width'], var_dict['height']],
-                    outputs=[var_dict['width'], var_dict['height']],
-                    show_progress=False,
-                    api_name=False)
+            create_image_size_bar(
+                var_dict, height=height, width=width, hw_slider_step=hw_slider_step)
         create_generate_bar(var_dict, text='Generate', seed=seed)
         create_base_opts(
             var_dict,

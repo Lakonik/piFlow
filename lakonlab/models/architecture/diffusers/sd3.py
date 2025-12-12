@@ -60,7 +60,8 @@ class SD3Transformer2DModel(_SD3Transformer2DModel):
         if pretrained is not None:
             logger = get_root_logger()
             load_checkpoint(
-                self, pretrained, map_location='cpu', strict=False, logger=logger, assign=True)
+                self, pretrained,
+                map_location='cpu', strict=False, logger=logger, assign=True, use_cache=True)
 
     def forward(
             self,

@@ -9,6 +9,7 @@ warnings.filterwarnings(
 )
 
 import os
+import inspect
 import argparse
 import multiprocessing as mp
 import platform
@@ -92,6 +93,10 @@ def parse_args():
         help='max dataset size')
     parser.add_argument(
         '--batch-size', type=int, default=4, help='batch size per GPU')
+    parser.add_argument(
+        '--skip-existing',
+        action='store_true',
+        help='skip computing samples whose cache .zst file already exists')
     parser.add_argument('--local-rank', '--local_rank', type=int, default=0)
     args = parser.parse_args()
     if 'LOCAL_RANK' not in os.environ:
@@ -128,6 +133,16 @@ class Preprocessor(nn.Module):
                 vae_dtype = next(self.vae.parameters()).dtype
             latents = self.vae.encode((data['images'] * 2 - 1).to(vae_dtype)).float()
             output.update(latents=latents)
+        if 'condition_images' in data and self.vae is not None:
+            if hasattr(self.vae, 'dtype'):
+                vae_dtype = self.vae.dtype
+            else:
+                vae_dtype = next(self.vae.parameters()).dtype
+            kwargs = dict()
+            if 'sample_mode' in inspect.signature(self.vae.encode).parameters:
+                kwargs.update(sample_mode='argmax')
+            condition_latents = self.vae.encode((data['condition_images'] * 2 - 1).to(vae_dtype), **kwargs).float()
+            output.update(condition_latents=condition_latents)
         return output
 
 
@@ -213,8 +228,7 @@ def main():
     num_cpus = mp.cpu_count() // int(local_world_size)
     max_save_cache_workers = max(num_cpus - 2, 1)
 
-    logger = get_root_logger(log_level=cfg.log_level, file_mode='a')
-    logger.info('evaluation')
+    logger = get_root_logger(log_level=cfg.log_level)
 
     # set random seeds
     if args.seed is not None:
@@ -258,95 +272,134 @@ def main():
         if args.max_size is not None:
             dataset.start_ind = -args.max_size
 
-        # build the dataloader
-        dataset = build_dataset(dataset)
-        bucket_ids = getattr(dataset, 'bucket_ids', None)
-
-        # The default loader config
-        loader_cfg = dict(
-            num_gpus=len(cfg.gpu_ids),
-            shuffle=False)
-        # The overall dataloader settings
-        loader_cfg.update({
-            k: v
-            for k, v in cfg.data.items()
-            if k not in [
-                'train', 'train_dataloader', 'val_dataloader', 'test_dataloader'
-            ] and not re.fullmatch(r'(val|test)\d*', k)
-        })
-
-        # specific config for test loader
-        batch_size = args.batch_size
-        test_loader_cfg = {**loader_cfg, **cfg.data.get('test_dataloader', {})}
-        test_loader_cfg.update(
-            samples_per_gpu=batch_size,
-            workers_per_gpu=1,
-            prefetch_factor=batch_size * 2)
-
-        dataloader = build_dataloader(dataset, **test_loader_cfg)
-
-        if args.seed is not None:
-            logger.info(f'Set random seed to {args.seed}, '
-                        f'deterministic: {args.deterministic}, '
-                        f'use_rank_shift: {args.diff_seed}')
-            set_random_seed(
-                args.seed,
-                deterministic=args.deterministic,
-                use_rank_shift=args.diff_seed)
-
-        batch_size = dataloader.batch_size
-        total_batch_size = batch_size * world_size
-
-        max_num = len(dataloader.dataset)
-
-        mp_ctx = mp.get_context("spawn")
-        proc_pool = ProcessPoolExecutor(
-            max_workers=min(max_save_cache_workers, batch_size * 2),
-            mp_context=mp_ctx)
-        cap = max_save_cache_workers * 2
-        pending = set()
-
-        torch.set_grad_enabled(False)
-
-        if rank == 0:
-            pbar = tqdm(total=max_num, desc=f'Caching {dataset_name} data')
-
-        for _, data in enumerate(dataloader):
-            outputs_dict = model.val_step(data)
-            data_ids = outputs_dict['data_ids']
-            prompts = outputs_dict['prompts']
-
-            for batch_id, data_id in enumerate(data_ids):
-                cached_data = dict(
-                    prompt=prompts[batch_id],
-                    prompt_embed_kwargs=dict())
-                for k, v in outputs_dict['prompt_embed_kwargs'].items():
-                    if k == 'encoder_hidden_states':
-                        encoder_hidden_states_fp8, encoder_hidden_states_scale = to_scaled_fp8(v[batch_id])
-                        cached_data['prompt_embed_kwargs']['encoder_hidden_states'] = encoder_hidden_states_fp8.cpu()
-                        cached_data['prompt_embed_kwargs']['encoder_hidden_states_scale'] = encoder_hidden_states_scale.cpu()
-                    else:
-                        cached_data['prompt_embed_kwargs'][k] = v[batch_id].cpu()
-                if 'latents' in outputs_dict:
-                    latents_fp8, latents_scale = to_scaled_fp8(outputs_dict['latents'][batch_id])
-                    cached_data['latents'] = latents_fp8.cpu()
-                    cached_data['latents_scale'] = latents_scale.cpu()
-                cached_data_name = f'{data_id:012d}'
-
-                if len(pending) >= cap:
-                    done, pending = wait(pending, return_when=FIRST_COMPLETED)
-                    for f in done:
-                        f.result()
-
-                pending.add(proc_pool.submit(
-                    save_cache,
-                    cached_data,
-                    os.path.join(cache_dir_path, cached_data_name + '.zst')))
+        if args.skip_existing:
+            dataset = build_dataset(dataset)
+            ori_len = len(dataset)
+            bucket_ids = getattr(dataset, 'bucket_ids', None)
 
             if rank == 0:
-                pbar.update(total_batch_size)
+                print(f'Checking existing cached files in {cache_dir_path} ...')
+                existing_files = root_file_client.list_dir_or_file(
+                    cache_dir_path)
+                existing_ids = set()
+                for file_path in existing_files:
+                    if file_path.endswith('.zst'):
+                        existing_ids.add(int(os.path.splitext(file_path)[0]))
+                subset_ids = [i for i in range(ori_len) if i not in existing_ids]
+                print(f'Found {len(existing_ids)} existing cached files, '
+                      f'Original dataset size: {ori_len}, '
+                      f'Skipping {ori_len - len(subset_ids)} samples. '
+                      f'{len(subset_ids)} samples to be cached.')
+            else:
+                subset_ids = None
 
-        proc_pool.shutdown(wait=True)
+            if distributed:
+                _subset_ids = [subset_ids]
+                subset_ids = dist.broadcast_object_list(
+                    _subset_ids, src=0)[0]
+
+            dataset = dict(
+                type='Subset',
+                dataset=dataset,
+                indices=subset_ids)
+            dataset = build_dataset(dataset)
+
+        else:
+            # build the dataloader
+            dataset = build_dataset(dataset)
+            ori_len = len(dataset)
+            bucket_ids = getattr(dataset, 'bucket_ids', None)
+
+        if len(dataset) > 0:
+            # The default loader config
+            loader_cfg = dict(
+                num_gpus=len(cfg.gpu_ids),
+                shuffle=False)
+            # The overall dataloader settings
+            loader_cfg.update({
+                k: v
+                for k, v in cfg.data.items()
+                if k not in [
+                    'train', 'train_dataloader', 'val_dataloader', 'test_dataloader'
+                ] and not re.fullmatch(r'(val|test)\d*', k)
+            })
+
+            # specific config for test loader
+            batch_size = args.batch_size
+            test_loader_cfg = {**loader_cfg, **cfg.data.get('test_dataloader', {})}
+            test_loader_cfg.update(
+                samples_per_gpu=batch_size,
+                workers_per_gpu=1,
+                prefetch_factor=batch_size * 2)
+
+            dataloader = build_dataloader(dataset, **test_loader_cfg)
+
+            if args.seed is not None:
+                logger.info(f'Set random seed to {args.seed}, '
+                            f'deterministic: {args.deterministic}, '
+                            f'use_rank_shift: {args.diff_seed}')
+                set_random_seed(
+                    args.seed,
+                    deterministic=args.deterministic,
+                    use_rank_shift=args.diff_seed)
+
+            batch_size = dataloader.batch_size
+            total_batch_size = batch_size * world_size
+
+            max_num = len(dataloader.dataset)
+
+            mp_ctx = mp.get_context("spawn")
+            proc_pool = ProcessPoolExecutor(
+                max_workers=min(max_save_cache_workers, batch_size * 2),
+                mp_context=mp_ctx)
+            cap = max_save_cache_workers * 2
+            pending = set()
+
+            torch.set_grad_enabled(False)
+
+            if rank == 0:
+                pbar = tqdm(total=max_num, desc=f'Caching {dataset_name} data')
+
+            for _, data in enumerate(dataloader):
+                outputs_dict = model.val_step(data)
+                data_ids = outputs_dict['data_ids']
+                prompts = outputs_dict['prompts']
+
+                for batch_id, data_id in enumerate(data_ids):
+                    cached_data = dict(
+                        prompt=prompts[batch_id],
+                        prompt_embed_kwargs=dict())
+                    for k, v in outputs_dict['prompt_embed_kwargs'].items():
+                        if k == 'encoder_hidden_states':
+                            encoder_hidden_states_fp8, encoder_hidden_states_scale = to_scaled_fp8(v[batch_id])
+                            cached_data['prompt_embed_kwargs']['encoder_hidden_states'] = encoder_hidden_states_fp8.cpu()
+                            cached_data['prompt_embed_kwargs']['encoder_hidden_states_scale'] = encoder_hidden_states_scale.cpu()
+                        else:
+                            cached_data['prompt_embed_kwargs'][k] = v[batch_id].cpu()
+                    if 'latents' in outputs_dict:
+                        latents_fp8, latents_scale = to_scaled_fp8(outputs_dict['latents'][batch_id])
+                        cached_data['latents'] = latents_fp8.cpu()
+                        cached_data['latents_scale'] = latents_scale.cpu()
+                    if 'condition_latents' in outputs_dict:
+                        condition_latents_fp8, condition_latents_scale = to_scaled_fp8(outputs_dict['condition_latents'][batch_id])
+                        cached_data['condition_latents'] = condition_latents_fp8.cpu()
+                        cached_data['condition_latents_scale'] = condition_latents_scale.cpu()
+                    cached_data_name = f'{data_id:012d}'
+
+                    if len(pending) >= cap:
+                        done, pending = wait(pending, return_when=FIRST_COMPLETED)
+                        for f in done:
+                            f.result()
+
+                    pending.add(proc_pool.submit(
+                        save_cache,
+                        cached_data,
+                        os.path.join(cache_dir_path, cached_data_name + '.zst')))
+
+                if rank == 0:
+                    pbar.update(total_batch_size)
+
+            proc_pool.shutdown(wait=True)
 
         if world_size > 1:
             dist.barrier()
@@ -363,7 +416,7 @@ def main():
                                 bucket_id=int(bucket_idx))
                         ).decode('utf-8') + '\n')
                 else:
-                    for data_id in range(len(dataset)):
+                    for data_id in range(ori_len):
                         datalist.append(orjson.dumps(
                             dict(
                                 filename=f'{data_id:012d}')
@@ -375,7 +428,7 @@ def main():
                 else:
                     bytesio.write(datalist)
             elif cache_datalist_path.endswith('.json'):
-                datalist = [f'{data_id:012d}' for data_id in range(len(dataset))]
+                datalist = [f'{data_id:012d}' for data_id in range(ori_len)]
                 bytesio.write(orjson.dumps(datalist))
             else:
                 raise ValueError('Datalist file must be .jsonl, .jsonl.gz or .json')

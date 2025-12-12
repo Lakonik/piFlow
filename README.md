@@ -12,13 +12,15 @@ Official PyTorch implementation of the paper:
 [Sai Bi](https://sai-bi.github.io/)<sup>2</sup><br>
 <sup>1</sup>Stanford University, <sup>2</sup>Adobe Research
 <br>
-[arXiv](https://arxiv.org/abs/2510.14974) | [ComfyUI](https://github.com/Lakonik/ComfyUI-piFlow) | [pi-Qwen Demo🤗](https://huggingface.co/spaces/Lakonik/pi-Qwen) | [pi-FLUX Demo🤗](https://huggingface.co/spaces/Lakonik/pi-FLUX.1)
+[arXiv](https://arxiv.org/abs/2510.14974) | [ComfyUI](https://github.com/Lakonik/ComfyUI-piFlow) | [pi-Qwen Demo🤗](https://huggingface.co/spaces/Lakonik/pi-Qwen) | [pi-FLUX Demo🤗](https://huggingface.co/spaces/Lakonik/pi-FLUX.1) | [pi-FLUX.2 Demo🤗](https://huggingface.co/spaces/Lakonik/pi-FLUX.2)
 
 <img src="assets/stanford_adobe_logos.png" width="400" alt=""/>
 
 <img src="assets/teaser.jpg" alt=""/>
 
 ## 🔥News
+
+- [Dec 12, 2025] pi-FLUX.2 is now available for 4-step image generation and editing! Check out the [pi-FLUX.2 Demo🤗](https://huggingface.co/spaces/Lakonik/pi-FLUX.2). Please re-install the latest version of LakonLab (this repository) to use pi-FLUX.2.
 
 - [Nov 7, 2025] [ComfyUI-piFlow](https://github.com/Lakonik/ComfyUI-piFlow) is now available! Supports 4-step sampling of Qwen-Image and Flux.1 dev using 8-bit models on a single consumer-grade GPU, powered by [ComfyUI](https://github.com/comfyanonymous/ComfyUI).
 
@@ -78,10 +80,11 @@ We provide diffusers pipelines for easy inference. The following code demonstrat
 
 ### [4-NFE GM-Qwen (GMFlow Policy)](demo/example_gmqwen_pipeline.py)
 Note: GM-Qwen supports elastic inference. Feel free to set `num_inference_steps` to any value above 4.
+
 ```python
 import torch
-from diffusers import FlowMatchEulerDiscreteScheduler
-from lakonlab.pipelines.piqwen_pipeline import PiQwenImagePipeline
+from lakonlab.models.diffusions.schedulers import FlowMapSDEScheduler
+from lakonlab.pipelines.pipeline_piqwen import PiQwenImagePipeline
 
 pipe = PiQwenImagePipeline.from_pretrained(
     'Qwen/Qwen-Image',
@@ -90,8 +93,8 @@ adapter_name = pipe.load_piflow_adapter(  # you may later call `pipe.set_adapter
     'Lakonik/pi-Qwen-Image',
     subfolder='gmqwen_k8_piid_4step',
     target_module_name='transformer')
-pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(  # use fixed shift=3.2
-    pipe.scheduler.config, shift=3.2, shift_terminal=None, use_dynamic_shifting=False)
+pipe.scheduler = FlowMapSDEScheduler.from_config(  # use fixed shift=3.2
+    pipe.scheduler.config, shift=3.2, use_dynamic_shifting=False, final_step_size_scale=0.5)
 pipe = pipe.to('cuda')
 
 out = pipe(
@@ -109,10 +112,11 @@ out.save('gmqwen_4nfe.png')
 
 ### [4-NFE GM-FLUX (GMFlow Policy)](demo/example_gmflux_pipeline.py)
 Note: For the 8-NFE version, replace `gmflux_k8_piid_4step` with `gmflux_k8_piid_8step` and set `num_inference_steps=8`.
+
 ```python
 import torch
-from diffusers import FlowMatchEulerDiscreteScheduler
-from lakonlab.pipelines.piflux_pipeline import PiFluxPipeline
+from lakonlab.models.diffusions.schedulers import FlowMapSDEScheduler
+from lakonlab.pipelines.pipeline_piflux import PiFluxPipeline
 
 pipe = PiFluxPipeline.from_pretrained(
     'black-forest-labs/FLUX.1-dev',
@@ -121,8 +125,8 @@ adapter_name = pipe.load_piflow_adapter(  # you may later call `pipe.set_adapter
     'Lakonik/pi-FLUX.1',
     subfolder='gmflux_k8_piid_4step',
     target_module_name='transformer')
-pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(  # use fixed shift=3.2
-    pipe.scheduler.config, shift=3.2, use_dynamic_shifting=False)
+pipe.scheduler = FlowMapSDEScheduler.from_config(  # use fixed shift=3.2
+    pipe.scheduler.config, shift=3.2, use_dynamic_shifting=False, final_step_size_scale=0.5)
 pipe = pipe.to('cuda')
 
 out = pipe(
@@ -140,6 +144,12 @@ out.save('gmflux_4nfe.png')
 
 See [example_dxqwen_pipeline.py](demo/example_dxqwen_pipeline.py) and [example_dxflux_pipeline.py](demo/example_dxflux_pipeline.py) for examples of using the DX policy.
 
+### 4-NFE GM-FLUX.2 (GMFlow Policy)
+
+See [example_gmflux2_pipeline.py](demo/example_gmflux2_pipeline.py) for an example of pi-FLUX.2 inference.
+
+Note: GM-FLUX.2 also supports elastic inference. Feel free to set `num_inference_steps` to any value above 4.
+
 ## Inference: Gradio Apps
 
 We provide Gradio apps for interactive inference with the distilled GM-Qwen and GM-FLUX models. 
@@ -152,6 +162,9 @@ python demo/gradio_gmqwen.py --share  # GM-Qwen elastic inference
 ```
 ```bash
 python demo/gradio_gmflux.py --share  # GM-FLUX 4-NFE and 8-NFE inference
+```
+```bash
+python demo/gradio_gmflux2.py --share  # GM-FLUX.2 elastic inference for image generation and editing
 ```
 
 <img src="assets/gradio_apps.jpg" width="600" alt=""/>
@@ -205,7 +218,7 @@ python tools/export_piflow_to_diffusers.py <PATH_TO_CONFIG> --ckpt <PATH_TO_CKPT
     - [train_piflow_dit_imagenet_toymodel.py](demo/train_piflow_dit_imagenet_toymodel.py) and [train_piflow_qwen_toymodel.py](demo/train_piflow_qwen_toymodel.py): Toy model distillation scripts with self-contained training loops.
     - [piflow.py](lakonlab/models/diffusions/piflow.py): The `forward_train` method contains the full training loop.
 - Inference
-    - [piqwen_pipeline.py](lakonlab/pipelines/piqwen_pipeline.py) and [piflux_pipeline.py](lakonlab/pipelines/piflux_pipeline.py): Full sampling code in the style of Diffusers.
+    - [pipeline_piqwen.py](lakonlab/pipelines/pipeline_piqwen.py), [pipeline_piflux.py](lakonlab/pipelines/pipeline_piflux.py), and [pipeline_piflux2.py](lakonlab/pipelines/pipeline_piflux2.py): Full sampling code in the style of Diffusers.
     - [piflow.py](lakonlab/models/diffusions/piflow.py): The `forward_test` method contains the same full sampling loop.
 - Policies 
     - [gmflow.py](lakonlab/models/diffusions/piflow_policies/gmflow.py): GMFlow policy.

@@ -1,6 +1,6 @@
 import torch
-from diffusers import FlowMatchEulerDiscreteScheduler
-from lakonlab.pipelines.piflux_pipeline import PiFluxPipeline
+from lakonlab.models.diffusions.schedulers import FlowMapSDEScheduler
+from lakonlab.pipelines.pipeline_piflux import PiFluxPipeline
 
 pipe = PiFluxPipeline.from_pretrained(
     'black-forest-labs/FLUX.1-dev',
@@ -9,8 +9,8 @@ adapter_name = pipe.load_piflow_adapter(  # you may later call `pipe.set_adapter
     'Lakonik/pi-FLUX.1',
     subfolder='gmflux_k8_piid_4step',
     target_module_name='transformer')
-pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(  # use fixed shift=3.2
-    pipe.scheduler.config, shift=3.2, use_dynamic_shifting=False)
+pipe.scheduler = FlowMapSDEScheduler.from_config(  # use fixed shift=3.2
+    pipe.scheduler.config, shift=3.2, use_dynamic_shifting=False, final_step_size_scale=0.5)
 pipe = pipe.to('cuda')
 
 out = pipe(

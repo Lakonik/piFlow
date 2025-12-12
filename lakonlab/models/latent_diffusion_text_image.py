@@ -17,10 +17,12 @@ class LatentDiffusionTextImage(BaseDiffusion):
                  *args,
                  vae=None,
                  text_encoder=None,
+                 use_condition_latents=False,
                  **kwargs):
         super().__init__(*args, **kwargs)
         self.vae = build_module(vae) if vae is not None else None
         self.text_encoder = build_module(text_encoder) if text_encoder is not None else None
+        self.use_condition_latents = use_condition_latents
 
     def _prepare_train_minibatch_diffusion_args(self, data):
         if 'prompt_embed_kwargs' in data:
@@ -31,16 +33,31 @@ class LatentDiffusionTextImage(BaseDiffusion):
         else:
             raise ValueError('Either `prompt_embed_kwargs` or `prompt_kwargs` should be provided in the input data.')
 
-        if 'latents' in data:
-            latents = data['latents']
-        elif 'images' in data:
-            assert self.vae is not None, 'VAE must be provided for encoding images to latents.'
-            with torch.no_grad():
+        if self.use_condition_latents and ('condition_latents' in data or 'condition_images' in data):
+            if 'condition_latents' in data:
+                condition_latents = data['condition_latents']
+            else:
+                assert self.vae is not None, 'VAE must be provided for encoding images to latents.'
                 if hasattr(self.vae, 'dtype'):
                     vae_dtype = self.vae.dtype
                 else:
                     vae_dtype = next(self.vae.parameters()).dtype
-                latents = self.vae.encode((data['images'] * 2 - 1).to(vae_dtype)).float()
+                kwargs = dict()
+                if 'sample_mode' in inspect.signature(rgetattr(self.vae, 'encode')).parameters:
+                    kwargs.update(sample_mode='argmax')
+                condition_latents = self.vae.encode(
+                    (data['condition_images'] * 2 - 1).to(vae_dtype), **kwargs).float()
+            prompt_embed_kwargs['condition_latents'] = self.patchify(condition_latents)
+
+        if 'latents' in data:
+            latents = data['latents']
+        elif 'images' in data:
+            assert self.vae is not None, 'VAE must be provided for encoding images to latents.'
+            if hasattr(self.vae, 'dtype'):
+                vae_dtype = self.vae.dtype
+            else:
+                vae_dtype = next(self.vae.parameters()).dtype
+            latents = self.vae.encode((data['images'] * 2 - 1).to(vae_dtype)).float()
         else:
             raise ValueError('Either `latents` or `images` should be provided in the input data.')
 
@@ -72,6 +89,8 @@ class LatentDiffusionTextImage(BaseDiffusion):
                 raise ValueError(
                     'Either `negative_prompt_embed_kwargs` or `negative_prompt_kwargs` should be provided in the '
                     'input data for classifier-free guidance.')
+            if 'condition_latents' in prompt_embed_kwargs:
+                negative_prompt_embed_kwargs['condition_latents'] = prompt_embed_kwargs['condition_latents']
             teacher_kwargs = {
                 k: torch.cat([negative_prompt_embed_kwargs[k], v], dim=0)
                 for k, v in prompt_embed_kwargs.items()}
@@ -114,6 +133,22 @@ class LatentDiffusionTextImage(BaseDiffusion):
         else:
             raise ValueError('Either `prompt_embed_kwargs` or `prompt_kwargs` should be provided in the input data.')
 
+        if self.use_condition_latents and ('condition_latents' in data or 'condition_images' in data):
+            if 'condition_latents' in data:
+                condition_latents = data['condition_latents']
+            else:
+                assert self.vae is not None, 'VAE must be provided for encoding images to latents.'
+                if hasattr(self.vae, 'dtype'):
+                    vae_dtype = self.vae.dtype
+                else:
+                    vae_dtype = next(self.vae.parameters()).dtype
+                kwargs = dict()
+                if 'sample_mode' in inspect.signature(rgetattr(self.vae, 'encode')).parameters:
+                    kwargs.update(sample_mode='argmax')
+                condition_latents = self.vae.encode(
+                    (data['condition_images'] * 2 - 1).to(vae_dtype), **kwargs).float()
+            prompt_embed_kwargs['condition_latents'] = self.patchify(condition_latents)
+
         v = next(iter(prompt_embed_kwargs.values()))
         bs = v.size(0)
         device = v.device
@@ -134,6 +169,8 @@ class LatentDiffusionTextImage(BaseDiffusion):
                     raise ValueError(
                         'Either `negative_prompt_embed_kwargs` or `negative_prompt_kwargs` should be provided in the '
                         'input data for classifier-free guidance.')
+                if self.use_condition_latents:
+                    negative_prompt_embed_kwargs['condition_latents'] = prompt_embed_kwargs['condition_latents']
                 kwargs = {
                     k: torch.cat([negative_prompt_embed_kwargs[k], v], dim=0)
                     for k, v in prompt_embed_kwargs.items()}

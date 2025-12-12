@@ -15,7 +15,7 @@ from peft import LoraConfig
 from mmcv.cnn import constant_init, xavier_init
 from mmgen.models.builder import MODULES
 from mmgen.utils import get_root_logger
-from lakonlab.runner.checkpoint import _load_checkpoint, load_full_state_dict
+from lakonlab.runner.checkpoint import _load_cached_checkpoint, load_full_state_dict
 from ..utils import flex_freeze
 from .gm_output import GMFlowModelOutput
 
@@ -273,7 +273,7 @@ class GMSD3Transformer2DModel(_GMSD3Transformer2DModel):
         if pretrained is not None:
             logger = get_root_logger()
             # load_checkpoint(self, pretrained, map_location='cpu', strict=False, logger=logger)
-            checkpoint = _load_checkpoint(pretrained, map_location='cpu', logger=logger)
+            checkpoint = _load_cached_checkpoint(pretrained, map_location='cpu', logger=logger)
             if 'state_dict' in checkpoint:
                 state_dict = checkpoint['state_dict']
             else:

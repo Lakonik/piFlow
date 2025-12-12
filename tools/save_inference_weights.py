@@ -1,7 +1,10 @@
 import os
 import argparse
 import torch
+from io import BytesIO
 from collections import OrderedDict
+from mmcv.fileio import FileClient
+from lakonlab.runner.checkpoint import write_checkpoint_to_file
 
 
 def parse_args():
@@ -22,20 +25,21 @@ def main():
         root, ext = os.path.splitext(path)
         out_path = root + '_inference' + ext
     dtype = args.dtype
-    a = torch.load(path, map_location='cpu')
-    if 'optimizer' in a:
-        del a['optimizer']
+    in_file_client = FileClient.infer_client(uri=path)
+    checkpoint = torch.load(BytesIO(in_file_client.get(path)), map_location='cpu')
+    if 'optimizer' in checkpoint:
+        del checkpoint['optimizer']
     if args.ema_only:
-        ema_keys = [key for key in a['state_dict'].keys() if '_ema' in key]
+        ema_keys = [key for key in checkpoint['state_dict'].keys() if '_ema' in key]
         exclude_keys = [key.replace('_ema', '') for key in ema_keys]
     else:
         exclude_keys = []
     out_dict = OrderedDict()
-    for key, value in a['state_dict'].items():
+    for key, value in checkpoint['state_dict'].items():
         if key not in exclude_keys:
             out_dict[key] = value.to(getattr(torch, dtype))
-    a['state_dict'] = out_dict
-    torch.save(a, out_path)
+    checkpoint['state_dict'] = out_dict
+    write_checkpoint_to_file(checkpoint, out_path)
 
 
 if __name__ == '__main__':

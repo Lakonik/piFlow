@@ -5,13 +5,14 @@ torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
 import gradio as gr
-from diffusers import FlowMatchEulerDiscreteScheduler, FluxPipeline
+from diffusers import FluxPipeline
+from lakonlab.models.diffusions.schedulers.flow_map_sde import FlowMapSDEScheduler
 from lakonlab.ui.gradio.create_text_to_img import create_interface_text_to_img
-from lakonlab.pipelines.piflux_pipeline import PiFluxPipeline
+from lakonlab.pipelines.pipeline_piflux import PiFluxPipeline
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description='GM-FLUX Gradio Demo')
+    parser = argparse.ArgumentParser(description='pi-FLUX Gradio Demo')
     parser.add_argument('--share', action='store_true', help='Enable Gradio sharing')
     return parser.parse_args()
 
@@ -27,8 +28,8 @@ def main():
         'black-forest-labs/FLUX.1-dev',
         torch_dtype=torch.bfloat16)
     base_pipe = base_pipe.to('cuda')
-    scheduler = FlowMatchEulerDiscreteScheduler.from_config(
-        base_pipe.scheduler.config, shift=3.2, use_dynamic_shifting=False)
+    scheduler = FlowMapSDEScheduler.from_config(
+        base_pipe.scheduler.config, shift=3.2, use_dynamic_shifting=False, final_step_size_scale=0.5)
 
     pipe_4nfe = PiFluxPipeline(
         transformer=base_pipe.transformer,
@@ -73,7 +74,7 @@ def main():
 
     with gr.Blocks(analytics_enabled=False,
                    title='pi-FLUX Demo',
-                   css='lakonlab/ui/gradio/style.css'
+                   css_paths='lakonlab/ui/gradio/style.css'
                    ) as demo:
 
         md_txt = '# pi-FLUX Demo\n\n' \

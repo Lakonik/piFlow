@@ -1,6 +1,7 @@
 # Copyright (c) 2025 Hansheng Chen
 
 import sys
+import inspect
 import torch
 import mmcv
 
@@ -9,7 +10,7 @@ from functools import partial
 from mmgen.models.architectures.common import get_module_device
 from mmgen.models.builder import MODULES
 
-from . import GaussianFlow
+from . import GaussianFlow, schedulers
 from .piflow_policies import POLICY_CLASSES, GMFlowPolicy
 from lakonlab.utils import module_eval
 
@@ -211,42 +212,49 @@ class PiFlowImitationBase(GaussianFlow):
         total_substeps = cfg.get('total_substeps', self.num_timesteps)
         eps = cfg.get('eps', 1e-4)
         nfe = cfg['nfe']
-        final_step_size_scale = max(cfg.get('final_step_size_scale', 1.0), eps)
-        base_segment_size = 1 / (nfe - 1 + final_step_size_scale)
 
-        raw_t_src = torch.ones((num_batches,), dtype=torch.float32, device=device)
-        sigma_t_src = self.timestep_sampler.warp_t(raw_t_src, seq_len=seq_len).reshape(
-            num_batches, *((ndim - 1) * [1]))
-        t_src = sigma_t_src.flatten() * self.num_timesteps
+        sampler = cfg.get('sampler', 'FlowMapSDE')
+        sampler_class = getattr(schedulers, sampler + 'Scheduler', None)
+        if sampler_class is None:
+            raise AttributeError(f'Cannot find sampler [{sampler}].')
+
+        sampler_kwargs = cfg.get('sampler_kwargs', {})
+        signatures = inspect.signature(sampler_class).parameters.keys()
+        for key in ['shift', 'use_dynamic_shifting', 'base_seq_len', 'max_seq_len', 'base_logshift', 'max_logshift']:
+            if key in signatures and key not in sampler_kwargs:
+                sampler_kwargs[key] = cfg.get(key, getattr(self.timestep_sampler, key))
+        if 'final_step_size_scale' in cfg:
+            sampler_kwargs['final_step_size_scale'] = cfg['final_step_size_scale']
+        sampler = sampler_class(self.num_timesteps, **sampler_kwargs)
+
+        sampler.set_timesteps(nfe, seq_len=seq_len, device=device)
+        timesteps = sampler.timesteps
+        timesteps_dst = sampler.timesteps_dst
 
         if show_pbar:
             pbar = mmcv.ProgressBar(self.distill_steps)
 
         # ========== Main sampling loop ==========
         for step_id in range(nfe):
-            is_final_step = step_id == nfe - 1
-            if is_final_step:
-                segment_size = base_segment_size * final_step_size_scale
-            else:
-                segment_size = base_segment_size
-
-            raw_t_dst = raw_t_src - segment_size
+            t_src = timesteps[step_id]
+            t_dst = timesteps_dst[step_id]
+            sigma_t_src = (t_src / self.num_timesteps).expand(num_batches).reshape(num_batches, *((ndim - 1) * [1]))
+            sigma_t_dst = (t_dst / self.num_timesteps).expand(num_batches).reshape(num_batches, *((ndim - 1) * [1]))
+            raw_t_src = self.timestep_sampler.unwarp_t(sigma_t_src.flatten(), seq_len=seq_len)
+            raw_t_dst = self.timestep_sampler.unwarp_t(sigma_t_dst.flatten(), seq_len=seq_len)
 
             denoising_output = self.pred(x_t_src, t_src, **kwargs)
             policy = self.policy_class(
                 denoising_output, x_t_src, sigma_t_src, eps=eps)
-            if isinstance(policy, GMFlowPolicy) and not is_final_step:
+            if isinstance(policy, GMFlowPolicy) and step_id < nfe - 1:
                 temperature = cfg.get('temperature', 1.0)
                 policy.temperature_(temperature)
 
-            x_t_dst, sigma_t_dst, t_dst = self.policy_rollout(
+            x_t_dst, _, _ = self.policy_rollout(
                 x_t_src, sigma_t_src, raw_t_src, raw_t_dst, total_substeps,
                 policy, seq_len=seq_len)
 
-            x_t_src = x_t_dst
-            raw_t_src = raw_t_dst
-            sigma_t_src = sigma_t_dst
-            t_src = t_dst
+            x_t_src = sampler.step(x_t_dst, t_src, x_t_src, return_dict=False)[0]
 
             if show_pbar:
                 pbar.update()

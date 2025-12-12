@@ -30,7 +30,7 @@ class GMFlowPolicy(BasePolicy):
             x_t_src: torch.Tensor,
             sigma_t_src: torch.Tensor,
             checkpointing: bool = True,
-            eps: float = 1e-4):
+            eps: float = 1e-6):
         self.x_t_src = x_t_src
         self.ndim = x_t_src.dim()
         self.checkpointing = checkpointing

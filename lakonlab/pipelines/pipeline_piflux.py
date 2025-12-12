@@ -1,6 +1,5 @@
 # Copyright (c) 2025 Hansheng Chen
 
-import numpy as np
 import torch
 
 from typing import Dict, List, Optional, Union, Any, Callable
@@ -17,10 +16,10 @@ from diffusers.utils import is_torch_xla_available
 from diffusers.image_processor import PipelineImageInput
 from diffusers.models import AutoencoderKL, FluxTransformer2DModel
 from diffusers.pipelines.flux.pipeline_flux import (
-    FluxPipeline, calculate_shift, FluxPipelineOutput, retrieve_timesteps)
-from diffusers.schedulers import FlowMatchEulerDiscreteScheduler
+    FluxPipeline, FluxPipelineOutput)
+from lakonlab.models.diffusions.schedulers.flow_map_sde import FlowMapSDEScheduler
 from lakonlab.models.diffusions.piflow_policies import POLICY_CLASSES
-from .piflow_loader import PiFlowLoaderMixin
+from .piflow_utils import PiFlowMixin
 
 
 if is_torch_xla_available():
@@ -31,46 +30,7 @@ else:
     XLA_AVAILABLE = False
 
 
-def retrieve_raw_timesteps(
-    num_inference_steps: int,
-    total_substeps: int,
-    final_step_size_scale: float
-):
-    r"""
-    Retrieve the raw times and the number of substeps for each inference step.
-
-    Args:
-        num_inference_steps (`int`):
-            Number of inference steps.
-        total_substeps (`int`):
-            Total number of substeps (e.g., 128).
-        final_step_size_scale (`float`):
-            Scale for the final step size (e.g., 0.5).
-
-    Returns:
-        `Tuple[List[float], List[int], int]`: A tuple where the first element is the raw timestep schedule, the second
-        element is the number of substeps for each inference step, and the third element is the rounded total number of
-        substeps.
-    """
-    base_segment_size = 1 / (num_inference_steps - 1 + final_step_size_scale)
-    raw_timesteps = []
-    num_inference_substeps = []
-    _raw_t = 1.0
-    for i in range(num_inference_steps):
-        if i < num_inference_steps - 1:
-            segment_size = base_segment_size
-        else:
-            segment_size = base_segment_size * final_step_size_scale
-        _num_inference_substeps = max(round(segment_size * total_substeps), 1)
-        num_inference_substeps.append(_num_inference_substeps)
-        raw_timesteps.extend(np.linspace(
-            _raw_t, _raw_t - segment_size, _num_inference_substeps, endpoint=False).clip(min=0.0).tolist())
-        _raw_t = _raw_t - segment_size
-    total_substeps = sum(num_inference_substeps)
-    return raw_timesteps, num_inference_substeps, total_substeps
-
-
-class PiFluxPipeline(FluxPipeline, PiFlowLoaderMixin):
+class PiFluxPipeline(FluxPipeline, PiFlowMixin):
     r"""
     The policy-based Flux pipeline for text-to-image generation.
 
@@ -79,7 +39,7 @@ class PiFluxPipeline(FluxPipeline, PiFlowLoaderMixin):
     Args:
         transformer ([`FluxTransformer2DModel`]):
             Conditional Transformer (MMDiT) architecture to denoise the encoded image latents.
-        scheduler ([`FlowMatchEulerDiscreteScheduler`]):
+        scheduler ([`FlowMapSDEScheduler`]):
             A scheduler to be used in combination with `transformer` to denoise the encoded image latents.
         vae ([`AutoencoderKL`]):
             Variational Auto-Encoder (VAE) Model to encode and decode images to and from latent representations.
@@ -103,7 +63,7 @@ class PiFluxPipeline(FluxPipeline, PiFlowLoaderMixin):
 
     def __init__(
         self,
-        scheduler: FlowMatchEulerDiscreteScheduler,
+        scheduler: FlowMapSDEScheduler,
         vae: AutoencoderKL,
         text_encoder: CLIPTextModel,
         tokenizer: CLIPTokenizer,
@@ -187,7 +147,7 @@ class PiFluxPipeline(FluxPipeline, PiFlowLoaderMixin):
 
         return latents
 
-    @torch.inference_mode()
+    @torch.no_grad()
     def __call__(
         self,
         prompt: Union[str, List[str]] = None,
@@ -196,7 +156,6 @@ class PiFluxPipeline(FluxPipeline, PiFlowLoaderMixin):
         width: Optional[int] = None,
         num_inference_steps: int = 4,
         total_substeps: int = 128,
-        final_step_size_scale: float = 0.5,
         temperature: Union[float, str] = 'auto',
         guidance_scale: float = 3.5,
         num_images_per_prompt: Optional[int] = 1,
@@ -231,8 +190,6 @@ class PiFluxPipeline(FluxPipeline, PiFlowLoaderMixin):
                 The number of denoising steps.
             total_substeps (`int`, *optional*, defaults to 128):
                 The total number of substeps for policy-based flow integration.
-            final_step_size_scale (`float`, *optional*, defaults to 0.5):
-                The scale for the final step size.
             temperature (`float` or `"auto"`, *optional*, defaults to `"auto"`):
                 The tmperature parameter for the flow policy.
             guidance_scale (`float`, *optional*, defaults to 3.5):
@@ -350,25 +307,11 @@ class PiFluxPipeline(FluxPipeline, PiFlowLoaderMixin):
         )
 
         # 5. Prepare timesteps
-        raw_timesteps, num_inference_substeps, total_substeps = retrieve_raw_timesteps(
-            num_inference_steps, total_substeps, final_step_size_scale)
         image_seq_len = latents.shape[1]
-        mu = calculate_shift(
-            image_seq_len,
-            self.scheduler.config.get("base_image_seq_len", 256),
-            self.scheduler.config.get("max_image_seq_len", 4096),
-            self.scheduler.config.get("base_shift", 0.5),
-            self.scheduler.config.get("max_shift", 1.15),
-        )
-        timesteps, _ = retrieve_timesteps(
-            self.scheduler,
-            num_inference_steps,
-            device,
-            sigmas=raw_timesteps,
-            mu=mu,
-        )
-        assert len(timesteps) == total_substeps
-        self._num_timesteps = total_substeps
+        self.scheduler.set_timesteps(num_inference_steps, seq_len=image_seq_len, device=self._execution_device)
+        timesteps = self.scheduler.timesteps
+        timesteps_dst = self.scheduler.timesteps_dst
+        self._num_timesteps = len(timesteps)
 
         # handle guidance
         if self.transformer.config.guidance_embeds:
@@ -391,17 +334,16 @@ class PiFluxPipeline(FluxPipeline, PiFlowLoaderMixin):
 
         # 6. Denoising loop
         self.scheduler.set_begin_index(0)
-        timestep_id = 0
-        with self.progress_bar(total=num_inference_steps) as progress_bar:
-            for i in range(num_inference_steps):
+        with self.progress_bar(total=self.num_timesteps) as progress_bar:
+            for i, (t_src, t_dst) in enumerate(zip(timesteps, timesteps_dst)):
                 if self.interrupt:
                     continue
 
-                t_src = timesteps[timestep_id]
-                sigma_t_src = t_src / self.scheduler.config.num_train_timesteps
-                is_final_step = i == (num_inference_steps - 1)
-
                 self._current_timestep = t_src
+                time_scaling = self.scheduler.config.num_train_timesteps
+                sigma_t_src = t_src / time_scaling
+                sigma_t_dst = t_dst / time_scaling
+
                 if image_embeds is not None:
                     self._joint_attention_kwargs["ip_adapter_image_embeds"] = image_embeds
 
@@ -426,7 +368,7 @@ class PiFluxPipeline(FluxPipeline, PiFlowLoaderMixin):
                     denoising_output = {k: v.to(torch.float32) for k, v in denoising_output.items()}
                     policy = self.policy_class(
                         denoising_output, latents, sigma_t_src)
-                    if not is_final_step:
+                    if i < self.num_timesteps - 1:
                         if temperature == 'auto':
                             temperature = min(max(0.1 * (num_inference_steps - 1), 0), 1)
                         else:
@@ -443,13 +385,11 @@ class PiFluxPipeline(FluxPipeline, PiFlowLoaderMixin):
                 else:
                     raise ValueError(f'Unknown policy type: {self.policy_type}.')
 
-                # compute the previous noisy sample x_t -> x_t-1
-                for _ in range(num_inference_substeps[i]):
-                    t = timesteps[timestep_id]
-                    sigma_t = t / self.scheduler.config.num_train_timesteps
-                    u = policy.pi(latents, sigma_t)
-                    latents = self.scheduler.step(u, t, latents, return_dict=False)[0]
-                    timestep_id += 1
+                latents_dst = self.policy_rollout(
+                    latents, sigma_t_src, sigma_t_dst, total_substeps,
+                    policy, seq_len=image_seq_len)
+
+                latents = self.scheduler.step(latents_dst, t_src, latents, return_dict=False)[0]
 
                 # repack
                 latents = self._pack_latents(

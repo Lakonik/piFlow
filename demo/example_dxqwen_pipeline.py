@@ -1,6 +1,6 @@
 import torch
-from diffusers import FlowMatchEulerDiscreteScheduler
-from lakonlab.pipelines.piqwen_pipeline import PiQwenImagePipeline
+from lakonlab.models.diffusions.schedulers import FlowMapSDEScheduler
+from lakonlab.pipelines.pipeline_piqwen import PiQwenImagePipeline
 
 pipe = PiQwenImagePipeline.from_pretrained(
     'Qwen/Qwen-Image',
@@ -13,8 +13,8 @@ adapter_name = pipe.load_piflow_adapter(  # you may later call `pipe.set_adapter
     'Lakonik/pi-Qwen-Image',
     subfolder='dxqwen_n10_piid_4step',
     target_module_name='transformer')
-pipe.scheduler = FlowMatchEulerDiscreteScheduler.from_config(  # use fixed shift=3.2
-    pipe.scheduler.config, shift=3.2, shift_terminal=None, use_dynamic_shifting=False)
+pipe.scheduler = FlowMapSDEScheduler.from_config(  # use fixed shift=3.2
+    pipe.scheduler.config, shift=3.2, use_dynamic_shifting=False, final_step_size_scale=0.5)
 pipe = pipe.to('cuda')
 
 out = pipe(
