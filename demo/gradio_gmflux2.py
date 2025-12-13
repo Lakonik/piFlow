@@ -18,22 +18,17 @@ def parse_args():
     return parser.parse_args()
 
 
-DEFAULT_PROMPT = (
-    "Photorealistic infographic showing the complete Berlin TV Tower (Fernsehturm) from ground base to antenna tip, "
-    "full vertical view with entire structure visible including concrete shaft, metallic sphere, and antenna spire. "
-    "Slight upward perspective angle looking up toward the iconic sphere, perfectly centered on clean white "
-    "background. Left side labels with thin horizontal connector lines: the text '368m' in extra large bold dark grey "
-    "numerals (#2D3748) positioned at exactly the antenna tip with 'TOTAL HEIGHT' in small caps below. The text '207m' "
-    "in extra large bold with 'TELECAFÉ' in small caps below, with connector line touching the sphere precisely at the "
-    "window level. Right side label with horizontal connector line touching the sphere's equator: the text '32m' in "
-    "extra large bold dark grey numerals with 'SPHERE DIAMETER' in small caps below. Bottom section arranged in three "
-    "balanced columns: Left - Large text '986' in extra bold dark grey with 'STEPS' in caps below. Center - 'BERLIN TV "
-    "TOWER' in bold caps with 'FERNSEHTURM' in lighter weight below. Right - 'INAUGURATED' in bold caps with 'OCTOBER "
-    "3, 1969' below. All typography in modern sans-serif font (such as Inter or Helvetica), color #2D3748, clean "
-    "minimal technical diagram style. Horizontal connector lines are thin, precise, and clearly visible, touching the "
-    "tower structure at exact corresponding measurement points. Professional architectural elevation drawing aesthetic "
-    "with dynamic low angle perspective creating sense of height and grandeur, poster-ready infographic design with "
-    "perfect visual hierarchy.")
+DEFAULT_PROMPT = """Museum-style FIELD GUIDE poster on neutral parchment (#F3EEE3). Use Inter (or Helvetica/Arial). All text #2D3748, thin connector lines 1px #A0AEC0.
+
+Center: full-body original fantasy creature, 3/4 standing pose. Around it: four small inset boxes labeled exactly "EYE DETAIL", "FOOT DETAIL", "SKIN TEXTURE", "SILHOUETTE SCALE" (with a simple human comparison silhouette). Bottom: a short footprint trail diagram. One small habitat vignette (misty rocky shoreline with tide pools).
+
+Exact text (only these, clean print layout):
+Top: "FIELD GUIDE"
+Sub: "AURORA SHOREWALKER"
+Small line: "CLASS: COASTAL DRIFTER"
+Under silhouette: "HEIGHT: 1.7 m"
+
+Crisp ink outlines with soft watercolor-like fills, high readability, balanced hierarchy, premium poster aesthetic."""
 
 SYSTEM_PROMPT_TEXT_ONLY_PATH = 'lakonlab/pipelines/prompt_rewriters/system_prompts/default_text_only.txt'
 SYSTEM_PROMPT_WITH_IMAGES_PATH = 'lakonlab/pipelines/prompt_rewriters/system_prompts/default_with_images.txt'
