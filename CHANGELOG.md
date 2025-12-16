@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- Fix a rare bug that caused the distributed run to hang when loading pretrained HuggingFace models.
+
 ## [0.1.0] - 2025-12-12
 
 ### Added

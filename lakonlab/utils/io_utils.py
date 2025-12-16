@@ -390,5 +390,8 @@ def hf_model_loader(model_class, repo_id, local_files_only=False, **kwargs):
         if local_files_only:
             raise e
         else:
+            is_dist = dist.is_available() and dist.is_initialized()
+            if is_dist:
+                dist.barrier()
             model = hf_model_downloader(model_class, repo_id, **kwargs)
     return model
