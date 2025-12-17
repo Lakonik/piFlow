@@ -335,7 +335,7 @@ class PiFlowMixin:
                     hf_quantizer.check_if_quantized_param(
                         piflow_module, param, param_name, base_state_dict, param_device=device)):
                 hf_quantizer.create_quantized_param(
-                    piflow_module, param, param_name, device, base_state_dict, unexpected_keys = [], dtype=torch_dtype
+                    piflow_module, param, param_name, device, base_state_dict, unexpected_keys=[], dtype=torch_dtype
                 )
             else:
                 assign_param(piflow_module, param_name, param)
