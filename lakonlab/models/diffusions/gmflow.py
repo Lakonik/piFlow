@@ -58,6 +58,7 @@ def gmflow_posterior_mean_jit(
     nu = alpha_over_sigma_t * x_t / sigma_t - alpha_over_sigma_t_src * x_t_src / sigma_t_src
 
     nu = nu.unsqueeze(gm_dim)  # (bs, *, 1, out_channels, h, w)
+    zeta = zeta.unsqueeze(gm_dim)  # (bs, *, 1, 1, 1, 1)
     denom = (gm_vars * zeta + 1).clamp(min=eps)
 
     out_means = (gm_vars * nu + gm_means) / denom
