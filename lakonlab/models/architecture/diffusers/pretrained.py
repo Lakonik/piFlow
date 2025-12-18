@@ -23,7 +23,7 @@ for name, logger in logging.root.manager.loggerDict.items():
 @MODULES.register_module()
 class PretrainedVAE(nn.Module):
     def __init__(self,
-                 from_pretrained=None,
+                 model_name_or_path=None,
                  del_encoder=False,
                  del_decoder=False,
                  use_slicing=False,
@@ -34,7 +34,7 @@ class PretrainedVAE(nn.Module):
         super().__init__()
         if torch_dtype is not None:
             kwargs.update(torch_dtype=getattr(torch, torch_dtype))
-        self.vae = hf_model_loader(AutoencoderKL, from_pretrained, **kwargs)
+        self.vae = hf_model_loader(AutoencoderKL, model_name_or_path, **kwargs)
         if del_encoder:
             del self.vae.encoder
         if del_decoder:
@@ -103,7 +103,7 @@ class PretrainedVAEEncoder(PretrainedVAE):
 @MODULES.register_module()
 class PretrainedVAEQwenImage(nn.Module):
     def __init__(self,
-                 from_pretrained=None,
+                 model_name_or_path=None,
                  use_slicing=False,
                  freeze=True,
                  eval_mode=True,
@@ -112,7 +112,7 @@ class PretrainedVAEQwenImage(nn.Module):
         super().__init__()
         if torch_dtype is not None:
             kwargs.update(torch_dtype=getattr(torch, torch_dtype))
-        self.vae = hf_model_loader(AutoencoderKLQwenImage, from_pretrained, **kwargs)
+        self.vae = hf_model_loader(AutoencoderKLQwenImage, model_name_or_path, **kwargs)
         if use_slicing:
             self.vae.enable_slicing()
         self.freeze = freeze
@@ -158,7 +158,7 @@ class PretrainedVAEQwenImage(nn.Module):
 @MODULES.register_module()
 class PretrainedVAEFlux2(nn.Module):
     def __init__(self,
-                 from_pretrained=None,
+                 model_name_or_path=None,
                  use_slicing=False,
                  freeze=True,
                  eval_mode=True,
@@ -167,7 +167,7 @@ class PretrainedVAEFlux2(nn.Module):
         super().__init__()
         if torch_dtype is not None:
             kwargs.update(torch_dtype=getattr(torch, torch_dtype))
-        self.vae = hf_model_loader(AutoencoderKLFlux2, from_pretrained, **kwargs)
+        self.vae = hf_model_loader(AutoencoderKLFlux2, model_name_or_path, **kwargs)
         if use_slicing:
             self.vae.enable_slicing()
         self.freeze = freeze
@@ -227,7 +227,7 @@ class PretrainedVAEFlux2(nn.Module):
 @MODULES.register_module()
 class PretrainedFluxTextEncoder(nn.Module):
     def __init__(self,
-                 from_pretrained='black-forest-labs/FLUX.1-dev',
+                 model_name_or_path='black-forest-labs/FLUX.1-dev',
                  freeze=True,
                  eval_mode=True,
                  torch_dtype='bfloat16',
@@ -237,7 +237,7 @@ class PretrainedFluxTextEncoder(nn.Module):
         self.max_sequence_length = max_sequence_length
         self.pipeline = hf_model_loader(
             FluxPipeline,
-            from_pretrained,
+            model_name_or_path,
             scheduler=None,
             vae=None,
             transformer=None,
@@ -269,7 +269,7 @@ class PretrainedFluxTextEncoder(nn.Module):
 @MODULES.register_module()
 class PretrainedQwenImageTextEncoder(nn.Module):
     def __init__(self,
-                 from_pretrained='Qwen/Qwen-Image',
+                 model_name_or_path='Qwen/Qwen-Image',
                  freeze=True,
                  eval_mode=True,
                  torch_dtype='bfloat16',
@@ -283,7 +283,7 @@ class PretrainedQwenImageTextEncoder(nn.Module):
         self.pad_seq_len = pad_seq_len
         self.pipeline = hf_model_loader(
             QwenImagePipeline,
-            from_pretrained,
+            model_name_or_path,
             scheduler=None,
             vae=None,
             transformer=None,
@@ -318,7 +318,7 @@ class PretrainedQwenImageTextEncoder(nn.Module):
 @MODULES.register_module()
 class PretrainedStableDiffusion3TextEncoder(nn.Module):
     def __init__(self,
-                 from_pretrained='stabilityai/stable-diffusion-3.5-large',
+                 model_name_or_path='stabilityai/stable-diffusion-3.5-large',
                  freeze=True,
                  eval_mode=True,
                  torch_dtype='float32',
@@ -328,7 +328,7 @@ class PretrainedStableDiffusion3TextEncoder(nn.Module):
         self.max_sequence_length = max_sequence_length
         self.pipeline = hf_model_loader(
             StableDiffusion3Pipeline,
-            from_pretrained,
+            model_name_or_path,
             scheduler=None,
             vae=None,
             transformer=None,
@@ -362,7 +362,7 @@ class PretrainedStableDiffusion3TextEncoder(nn.Module):
 @MODULES.register_module()
 class PretrainedFlux2TextEncoder(nn.Module):
     def __init__(self,
-                 from_pretrained='black-forest-labs/FLUX.2-dev',
+                 model_name_or_path='black-forest-labs/FLUX.2-dev',
                  freeze=True,
                  eval_mode=True,
                  torch_dtype='bfloat16',
@@ -372,7 +372,7 @@ class PretrainedFlux2TextEncoder(nn.Module):
         self.max_sequence_length = max_sequence_length
         self.pipeline = hf_model_loader(
             Flux2Pipeline,
-            from_pretrained,
+            model_name_or_path,
             scheduler=None,
             vae=None,
             transformer=None,

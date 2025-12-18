@@ -135,7 +135,7 @@ def main():
     dtype = 'bfloat16' if torch.cuda.is_bf16_supported() else 'float16'
 
     text_encoder = PretrainedQwenImageTextEncoder(
-        from_pretrained='Qwen/Qwen-Image',
+        model_name_or_path='Qwen/Qwen-Image',
         torch_dtype=dtype,
         max_sequence_length=512,
         pad_seq_len=512,
@@ -153,7 +153,7 @@ def main():
     torch.cuda.empty_cache()
 
     vae = PretrainedVAEQwenImage(
-        from_pretrained='Qwen/Qwen-Image',
+        model_name_or_path='Qwen/Qwen-Image',
         subfolder='vae',
         torch_dtype=dtype).to(device)
     vae_scale_factor = 8

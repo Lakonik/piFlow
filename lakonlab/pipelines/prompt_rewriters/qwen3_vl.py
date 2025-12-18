@@ -14,7 +14,7 @@ class Qwen3VLPromptRewriter:
 
     def __init__(
             self,
-            from_pretrained="Qwen/Qwen3-VL-8B-Instruct",
+            model_name_or_path="Qwen/Qwen3-VL-8B-Instruct",
             torch_dtype='bfloat16',
             device_map="auto",
             max_new_tokens_default=128,
@@ -25,10 +25,10 @@ class Qwen3VLPromptRewriter:
             kwargs.update(torch_dtype=getattr(torch, torch_dtype))
         self.model = hf_model_loader(
             Qwen3VLForConditionalGeneration,
-            from_pretrained,
+            model_name_or_path,
             device_map=device_map,
             **kwargs)
-        self.processor = AutoProcessor.from_pretrained(from_pretrained)
+        self.processor = AutoProcessor.from_pretrained(model_name_or_path)
         # Left padding is safer for batched generation
         if hasattr(self.processor, "tokenizer"):
             self.processor.tokenizer.padding_side = "left"

@@ -68,7 +68,7 @@ if __name__ == '__main__':
         persistent_workers=True, prefetch_factor=max(1, args.batch_size // 4), dist=True, shuffle=False)
 
     encoder = PretrainedVAEEncoder(
-        from_pretrained='stabilityai/sd-vae-ft-ema', torch_dtype=args.dtype).eval().cuda()
+        model_name_or_path='stabilityai/sd-vae-ft-ema', torch_dtype=args.dtype).eval().cuda()
 
     root_file_client = FileClient.infer_client(uri=args.out_data_root)
     datalist_file_client = FileClient.infer_client(uri=args.out_datalist_path)

@@ -149,7 +149,7 @@ def main():
         class_labels = F.pad(class_labels, (1, 0), value=1000)
 
     vae = PretrainedVAE(
-        from_pretrained='stabilityai/sd-vae-ft-ema',
+        model_name_or_path='stabilityai/sd-vae-ft-ema',
         torch_dtype=dtype).to(device)
     vae_scale_factor = 8
     vae_latent_size = (4, 256 // vae_scale_factor, 256 // vae_scale_factor)
