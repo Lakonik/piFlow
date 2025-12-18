@@ -1,9 +1,14 @@
 # Changelog
 
-## [Unreleased]
+## [0.1.1] - 2025-12-18
+
+### Changed
+- **Breaking:** Rename the pretrained HuggingFace model argument `from_pretrained` to `model_name_or_path`. Please update any custom configurations or scripts accordingly.
 
 ### Fixed
-- Fix a rare bug that caused the distributed run to hang when loading pretrained HuggingFace models.
+- **Important:** Fix a GMFlow batching bug introduced by the recent numerical-stability change.
+- Fix loading pi-Flow adapters for TorchAO-quantized base models.
+- Fix a rare bug that could cause distributed runs to hang when loading pretrained HuggingFace models.
 
 ## [0.1.0] - 2025-12-12
 
