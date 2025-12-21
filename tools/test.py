@@ -242,12 +242,6 @@ def main():
                 os.path.dirname(viz_dir), os.path.basename(viz_dir) + '.html')
             if args.skip_existing and file_client.exists(html_path):
                 continue
-            if rank == 0:
-                if file_client.exists(viz_dir):
-                    for name in file_client.list_dir_or_file(viz_dir):
-                        file_client.remove(file_client.join_path(viz_dir, name))
-            if distributed:
-                dist.barrier()
 
         metrics = eval_cfg['metrics']
         if isinstance(metrics, dict):
