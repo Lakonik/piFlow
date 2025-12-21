@@ -147,21 +147,21 @@ class PiFlowImitationBase(GaussianFlow):
                 (bs, 1), device=device)
         ) * (teacher_ratio * (segment_size - window_size).unsqueeze(-1))
 
-        x_t = x_t_src
-        raw_t = raw_t_src
-        sigma_t = sigma_t_src
+        x_t_last = x_t_src
+        raw_t_last = raw_t_src
+        sigma_t_last = sigma_t_src
 
         all_pred_u = []
         all_tgt_u = []
         all_timesteps = []
 
         for teacher_step_id in range(num_intermediate_states):
-            raw_t_a = (raw_t - student_intervals[:, teacher_step_id]).clamp(min=0)
+            raw_t_a = (raw_t_last - student_intervals[:, teacher_step_id]).clamp(min=0)
             raw_t_b = (raw_t_a - teacher_intervals[:, teacher_step_id]).clamp(min=0)
 
             with torch.no_grad(), module_eval(teacher):
                 x_t_a, sigma_t_a, t_a = self.policy_rollout(
-                    x_t, sigma_t, raw_t, raw_t_a, total_substeps,
+                    x_t_last, sigma_t_last, raw_t_last, raw_t_a, total_substeps,
                     policy_detached, seq_len=seq_len)
                 tgt_u = teacher(return_u=True, x_t=x_t_a, t=t_a, **teacher_kwargs)
                 all_tgt_u.append(tgt_u)
@@ -173,9 +173,11 @@ class PiFlowImitationBase(GaussianFlow):
             all_pred_u.append(pred_u)
 
             sigma_t_b = self.timestep_sampler.warp_t(raw_t_b, seq_len=seq_len).reshape(bs, *((ndim - 1) * [1]))
-            x_t = x_t_a + tgt_u * (sigma_t_b - sigma_t_a)
-            raw_t = raw_t_b
-            sigma_t = sigma_t_b
+            x_t_b = x_t_a + tgt_u * (sigma_t_b - sigma_t_a)
+
+            x_t_last = x_t_b
+            raw_t_last = raw_t_b
+            sigma_t_last = sigma_t_b
 
         loss_kwargs = dict(
             u_t_pred=torch.cat(all_pred_u, dim=0),
@@ -187,7 +189,7 @@ class PiFlowImitationBase(GaussianFlow):
         if get_x_t_dst:
             with torch.no_grad():
                 x_t_dst, _, _ = self.policy_rollout(
-                    x_t, sigma_t, raw_t, raw_t_dst, total_substeps,
+                    x_t_last, sigma_t_last, raw_t_last, raw_t_dst, total_substeps,
                     policy_detached, seq_len=seq_len)
         else:
             x_t_dst = None
