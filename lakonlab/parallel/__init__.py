@@ -1,3 +1,19 @@
+import torch
+import mmcv.parallel._functions
+from torch.nn.parallel._functions import _get_stream
+
+
+def _get_stream_wrapper(dev):
+    if isinstance(dev, int):
+        if dev == -1:
+            return None
+        dev = torch.device("cuda", dev)
+    return _get_stream(dev)
+
+
+mmcv.parallel._functions._get_stream = _get_stream_wrapper
+
+
 from .distributed import MMDistributedDataParallel
 from .ddp_wrapper import DistributedDataParallelWrapper
 from .fsdp_wrapper import FSDPWrapper
