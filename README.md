@@ -153,7 +153,7 @@ Note: GM-FLUX.2 also supports elastic inference. Feel free to set `num_inference
 ## Inference: Gradio Apps
 
 We provide Gradio apps for interactive inference with the distilled GM-Qwen and GM-FLUX models. 
-Official apps are available on HuggingFace Spaces: [pi-Qwen Demo🤗](https://huggingface.co/spaces/Lakonik/pi-Qwen) and [pi-FLUX Demo🤗](https://huggingface.co/spaces/Lakonik/pi-FLUX.1).
+Official apps are available on HuggingFace Spaces: [pi-Qwen Demo🤗](https://huggingface.co/spaces/Lakonik/pi-Qwen) | [pi-FLUX Demo🤗](https://huggingface.co/spaces/Lakonik/pi-FLUX.1) | [pi-FLUX.2 Demo🤗](https://huggingface.co/spaces/Lakonik/pi-FLUX.2).
 
 Run the following commands to launch the apps locally:
 
