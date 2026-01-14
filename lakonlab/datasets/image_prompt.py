@@ -160,6 +160,9 @@ class ImagePrompt(Dataset):
                     self.prompt_dataset = load_dataset(**_prompt_dataset_kwargs)
             else:
                 self.prompt_dataset = load_dataset(**prompt_dataset_kwargs)
+            if prompt_dataset_kwargs.get('path', None) == 'text':
+                self.prompt_dataset = self.prompt_dataset.rename_column(
+                    'text', 'prompt')
             if isinstance(self.prompt_dataset, DatasetDict):
                 split = 'train' if 'train' in self.prompt_dataset else list(self.prompt_dataset.keys())[0]
                 self.prompt_dataset = self.prompt_dataset[split]
