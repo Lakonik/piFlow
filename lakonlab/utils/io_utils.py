@@ -27,7 +27,7 @@ from mmcv.fileio import BaseStorageBackend, FileClient
 from mmgen.utils.io_utils import MMGEN_CACHE_DIR
 
 
-AWS_REGION = os.getenv('AWS_REGION', 'us-west-2')
+AWS_REGION = os.getenv('AWS_REGION')
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 AWS_SESSION_TOKEN = os.getenv('AWS_SESSION_TOKEN')
@@ -119,11 +119,11 @@ class S3Backend(BaseStorageBackend):
 
     _allow_symlink = True
 
-    def __init__(self):
-        if AWS_ACCESS_KEY_ID is not None and AWS_SECRET_ACCESS_KEY is not None and AWS_SESSION_TOKEN is not None:
-            config = Config(region_name=AWS_REGION)
-        else:
+    def __init__(self, anonymous: bool = False):
+        if anonymous:
             config = Config(region_name=AWS_REGION, signature_version=UNSIGNED)
+        else:
+            config = Config(region_name=AWS_REGION)
         self._client = boto3.client(
             's3',
             aws_access_key_id=AWS_ACCESS_KEY_ID,
