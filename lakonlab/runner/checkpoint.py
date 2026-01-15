@@ -141,8 +141,13 @@ def exists_ckpt(filename):
         raise NotImplementedError()
 
 
-@CheckpointLoader.register_scheme(prefixes='s3://', force=True)
 @retry()
+def _load_from_s3(s3_filename, local_filename):
+    cmd = ['aws', 's3', 'cp', s3_filename, local_filename]
+    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+
+
+@CheckpointLoader.register_scheme(prefixes='s3://', force=True)
 def load_from_s3(filename, map_location=None):
     ext = os.path.splitext(filename)[-1].lower()
 
@@ -164,8 +169,7 @@ def load_from_s3(filename, map_location=None):
 
     # download the file to temp dir
     if local_rank == 0:
-        cmd = ['aws', 's3', 'cp', filename, tmp_file]
-        subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL)
+        _load_from_s3(filename, tmp_file)
     if ws > 1:
         dist.barrier()
 
@@ -198,7 +202,6 @@ def load_from_s3(filename, map_location=None):
 
 
 @CheckpointLoader.register_scheme(prefixes='tmp:')
-@retry()
 def load_from_tmp(filename, map_location=None):
     src_file = filename[4:]
     assert os.path.exists(src_file)
@@ -240,8 +243,16 @@ def load_from_tmp(filename, map_location=None):
     return ckpt
 
 
-@CheckpointLoader.register_scheme(prefixes='huggingface://')
 @retry()
+def _load_from_huggingface_sharded(repo_id, cached_file, subfolder):
+    sharded_cached_files = _get_checkpoint_shard_files(
+        repo_id,
+        cached_file,
+        subfolder=subfolder)[0]
+    return sharded_cached_files
+
+
+@CheckpointLoader.register_scheme(prefixes='huggingface://')
 def load_from_huggingface(filename, map_location=None):
     cached_file = download_from_huggingface(filename)
     if cached_file.endswith('.index.json'):  # sharded checkpoint
@@ -254,17 +265,13 @@ def load_from_huggingface(filename, map_location=None):
         else:
             local_rank = 0
         if local_rank == 0:
-            sharded_cached_files = _get_checkpoint_shard_files(
-                repo_id,
-                cached_file,
-                subfolder=repo_subfolder)[0]
+            sharded_cached_files = _load_from_huggingface_sharded(
+                repo_id, cached_file, repo_subfolder)
         if is_dist:
             dist.barrier()
         if local_rank > 0:
-            sharded_cached_files = _get_checkpoint_shard_files(
-                repo_id,
-                cached_file,
-                subfolder=repo_subfolder)[0]
+            sharded_cached_files = _load_from_huggingface_sharded(
+                repo_id, cached_file, repo_subfolder)
         ckpt = OrderedDict()
         for sharded_cached_file in sharded_cached_files:
             ckpt.update(load_from_local(sharded_cached_file, map_location))
@@ -278,7 +285,6 @@ def load_from_huggingface(filename, map_location=None):
 
 
 @CheckpointLoader.register_scheme(prefixes='', force=True)
-@retry()
 def load_from_local(filename, map_location=None):
     filename = osp.expanduser(filename)
     if not osp.isfile(filename):

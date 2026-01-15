@@ -55,6 +55,10 @@ def retry(tries=5, delay=3, exceptions=(Exception,)):
 
 
 @retry()
+def _download_from_url(url, dest_path, hash_prefix):
+    download_url_to_file(url, dest_path, hash_prefix, progress=True)
+
+
 def download_from_url(url,
                       dest_path=None,
                       dest_dir=MMGEN_CACHE_DIR,
@@ -85,7 +89,7 @@ def download_from_url(url,
         # mkdir
         _dir = os.path.dirname(dest_path)
         mmcv.mkdir_or_exist(_dir)
-        download_url_to_file(url, dest_path, hash_prefix, progress=True)
+        _download_from_url(url, dest_path, hash_prefix)
 
     # sync the other processes
     if is_dist:
@@ -95,6 +99,11 @@ def download_from_url(url,
 
 
 @retry()
+def _download_from_huggingface(repo_id, repo_filename):
+    cached_file = hf_hub_download(repo_id=repo_id, filename=repo_filename)
+    return cached_file
+
+
 def download_from_huggingface(filename):
     filename = filename.replace('huggingface://', '').split('/')
     repo_id = '/'.join(filename[:2])
@@ -105,13 +114,11 @@ def download_from_huggingface(filename):
     else:
         local_rank = 0
     if local_rank == 0:
-        cached_file = hf_hub_download(
-            repo_id=repo_id, filename=repo_filename)
+        cached_file = _download_from_huggingface(repo_id, repo_filename)
     if is_dist:
         dist.barrier()
     if local_rank > 0:
-        cached_file = hf_hub_download(
-            repo_id=repo_id, filename=repo_filename)
+        cached_file = _download_from_huggingface(repo_id, repo_filename)
     return cached_file
 
 
@@ -368,30 +375,21 @@ def load_images_parallel(filepaths, file_client):
 
 
 @retry()
-def hf_model_downloader(model_class, repo_id, **kwargs):
+def _hf_model_loader(model_class, repo_id, **kwargs):
+    model = model_class.from_pretrained(repo_id, **kwargs)
+    return model
+
+
+def hf_model_loader(model_class, repo_id, **kwargs):
     is_dist = dist.is_available() and dist.is_initialized()
     if is_dist:
         local_rank = dist.get_node_local_rank()
     else:
         local_rank = 0
     if local_rank == 0:
-        model = model_class.from_pretrained(repo_id, **kwargs)
+        model = _hf_model_loader(model_class, repo_id, **kwargs)
     if is_dist:
         dist.barrier()
     if local_rank > 0:
-        model = model_class.from_pretrained(repo_id, **kwargs)
-    return model
-
-
-def hf_model_loader(model_class, repo_id, local_files_only=False, **kwargs):
-    try:
-        model = model_class.from_pretrained(repo_id, local_files_only=True, **kwargs)
-    except Exception as e:
-        if local_files_only:
-            raise e
-        else:
-            is_dist = dist.is_available() and dist.is_initialized()
-            if is_dist:
-                dist.barrier()
-            model = hf_model_downloader(model_class, repo_id, **kwargs)
+        model = _hf_model_loader(model_class, repo_id, **kwargs)
     return model
