@@ -295,8 +295,8 @@ def main():
 
             if distributed:
                 _subset_ids = [subset_ids]
-                subset_ids = dist.broadcast_object_list(
-                    _subset_ids, src=0)[0]
+                dist.broadcast_object_list(_subset_ids, src=0)
+                subset_ids = _subset_ids[0]
 
             dataset = dict(
                 type='Subset',
