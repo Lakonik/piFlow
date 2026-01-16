@@ -127,7 +127,7 @@ class ImagePrompt(Dataset):
                  test_mode: bool = False):
         super().__init__()
         self.data_root = data_root
-        self.file_client = FileClient.infer_client(uri=self.data_root)
+        self._file_client = None
 
         self.pad_seq_len = pad_seq_len
 
@@ -141,11 +141,13 @@ class ImagePrompt(Dataset):
         self.bucketize = bucketize
         bucket_ids = None
 
+        _file_client = FileClient.infer_client(uri=data_root)
+
         if (cache_dir is not None
-                and self.file_client.isdir(self.file_client.join_path(data_root, cache_dir))
+                and _file_client.isdir(_file_client.join_path(data_root, cache_dir))
                 and cache_datalist_path is not None
                 and FileClient.infer_client(uri=cache_datalist_path).isfile(cache_datalist_path)):
-            self.cache_dir_path = self.file_client.join_path(data_root, cache_dir)
+            self.cache_dir_path = _file_client.join_path(data_root, cache_dir)
             self.cache_datalist, bucket_ids, _ = self.parse_datalist(
                 self.cache_dir_path, cache_datalist_path)
             dataset_len = len(self.cache_datalist)
@@ -173,16 +175,16 @@ class ImagePrompt(Dataset):
         else:
             raise ValueError('Either `cache_dir` or `prompt_dataset_kwargs` must be provided.')
 
-        if image_dir is not None and self.file_client.isdir(
-                self.file_client.join_path(data_root, image_dir)):
-            self.image_dir_path = self.file_client.join_path(data_root, image_dir)
+        if image_dir is not None and _file_client.isdir(
+                _file_client.join_path(data_root, image_dir)):
+            self.image_dir_path = _file_client.join_path(data_root, image_dir)
             self.image_datalist, bucket_ids, self.image_sizes = self.parse_datalist(
                 self.image_dir_path, image_datalist_path, datalist_must_exist=True)
             assert dataset_len == len(self.image_datalist)
 
-        if condition_image_dir is not None and self.file_client.isdir(
-                self.file_client.join_path(data_root, condition_image_dir)):
-            self.condition_image_dir_path = self.file_client.join_path(data_root, condition_image_dir)
+        if condition_image_dir is not None and _file_client.isdir(
+                _file_client.join_path(data_root, condition_image_dir)):
+            self.condition_image_dir_path = _file_client.join_path(data_root, condition_image_dir)
             # No bucket ids for condition images, we assume that they either have the same shape,
             # or share the same bucket_ids as the main images
             self.condition_image_datalist, _, self.condition_image_sizes = self.parse_datalist(
@@ -225,6 +227,12 @@ class ImagePrompt(Dataset):
             self.bucket_ids = [bucket_ids[self._map_idx(i)] for i in range(len(self))]
 
         self.test_mode = test_mode
+
+    @property
+    def file_client(self):
+        if self._file_client is None:
+            self._file_client = FileClient.infer_client(uri=self.data_root)
+        return self._file_client
 
     def get_bucket_ids_from_prompt_dataset(self):
         ds = self.prompt_dataset
@@ -294,7 +302,8 @@ class ImagePrompt(Dataset):
                 logger=logger,
                 level=logging.WARNING)
             # list all files in the directory
-            filenames = [os.path.splitext(p)[0] for p in self.file_client.list_dir_or_file(dir_path)]
+            _file_client = FileClient.infer_client(uri=dir_path)
+            filenames = [os.path.splitext(p)[0] for p in _file_client.list_dir_or_file(dir_path)]
             filenames.sort()
             bucket_ids = None
             image_sizes = None

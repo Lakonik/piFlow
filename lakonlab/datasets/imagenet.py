@@ -65,7 +65,7 @@ class ImageNet(Dataset):
             num_test_images=50000):
         super().__init__()
         self.data_root = data_root
-        self.file_client = FileClient.infer_client(uri=self.data_root)
+        self._file_client = None
 
         self.datalist_path = datalist_path
         self.label2name_path = label2name_path
@@ -110,6 +110,12 @@ class ImageNet(Dataset):
             mmcv.print_log(f'Data root: {self.data_root}', logger=logger)
             mmcv.print_log(f'Data list path: {self.datalist_path}', logger=logger)
             mmcv.print_log(f'Number of images: {len(self.all_paths)}', logger=logger)
+
+    @property
+    def file_client(self):
+        if self._file_client is None:
+            self._file_client = FileClient.infer_client(uri=self.data_root)
+        return self._file_client
 
     def __len__(self):
         return self.num_test_images if self.test_mode else len(self.all_paths)
