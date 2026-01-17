@@ -2,8 +2,6 @@
 
 import sys
 import os
-import re
-import unicodedata
 import numpy as np
 import torch
 import torch.distributed as dist
@@ -22,9 +20,6 @@ from lakonlab.ui.media_viewer import write_html
 
 default_timers.add_timer('total time')
 
-_reserved = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
-_invalid = re.compile(r'[<>:"/\\|?*\:%]+')
-
 
 def flatten_list(lst):
     for item in lst:
@@ -32,18 +27,6 @@ def flatten_list(lst):
             yield from flatten_list(item)  # recurse into sub-list
         else:
             yield item
-
-
-def _safe_name(name: str, max_len: int = 160) -> str:
-    s = unicodedata.normalize("NFKC", str(name))
-    s = "".join(c for c in s if 32 <= ord(c) != 127)  # drop control chars
-    s = _invalid.sub("", s).strip(" ._")  # strip invalid chars
-    if s.startswith("."):
-        s = s.lstrip(".")  # avoid hidden files
-    if s.upper() in _reserved:
-        s += "_"  # avoid reserved names
-    s = (s or "untitled")[:max_len].rstrip(" .")  # truncate & clean
-    return s or "untitled"
 
 
 def evaluate(model, dataloader, metrics=None,
@@ -93,8 +76,7 @@ def evaluate(model, dataloader, metrics=None,
             all_png_exist = True
 
             for name, data_id in zip(batch_names, ids):
-                safe_name = _safe_name(name)
-                filename = f'{data_id:09d}_{safe_name}.png'
+                filename = f'{data_id:09d}.png'
                 filepath = file_client.join_path(viz_dir, filename)
                 if file_client.isfile(filepath):
                     reuse_candidates.append((data_id, name, filename, filepath))
@@ -138,18 +120,17 @@ def evaluate(model, dataloader, metrics=None,
                     if (viz_num is not None and data_id >= viz_num) or (data_id in saved_data_ids):
                         continue
                     name = batch_names[batch_id]
-                    safe_name = _safe_name(name)
 
                     image_viz = (outputs_dict['pred_imgs'][batch_id] * 255).round().to(torch.uint8)
                     if image_viz.dim() == 3:  # image
                         image_viz = image_viz.permute(1, 2, 0).cpu().numpy()
-                        filename = f'{data_id:09d}_{safe_name}.png'
+                        filename = f'{data_id:09d}.png'
                         executor.submit(
                             save_image,
                             image_viz, file_client.join_path(viz_dir, filename), file_client)
                     elif image_viz.dim() == 4:  # video
                         image_viz = image_viz.permute(1, 2, 3, 0).cpu().numpy()  # (t, h, w, c)
-                        filename = f'{data_id:09d}_{safe_name}.mp4'
+                        filename = f'{data_id:09d}.mp4'
                         executor.submit(
                             save_video,
                             image_viz, file_client.join_path(viz_dir, filename), file_client, fps)
