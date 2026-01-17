@@ -182,7 +182,6 @@ def main():
         distributed = True
         init_dist(
             args.launcher,
-            timeout=datetime.timedelta(seconds=3600),
             **cfg.dist_params)
         # re-set gpu_ids with distributed training mode
         _, world_size = get_dist_info()
