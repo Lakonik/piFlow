@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.1.2] - 2026-01-18
+
+### Added
+- Support for loading prompt list from plain text files in `ImagePromptDataset`. Example:
+  ```
+  prompt_dataset_kwargs=dict(
+      path='text',
+      data_files='https://raw.githubusercontent.com/ModelTC/Qwen-Image-Lightning/refs/heads/main/examples/prompt_list.txt',
+      split="train"),
+  ```
+- Support for `spawn` start method for S3 dataloader workers.
+
+### Changed
+- **Breaking:** Teacher guidance parameters are now specified in the `teacher_test_cfg` section of the configuration file. Please update your configuration files accordingly.
+- Change `S3Backend` default settings:
+  - Set default `AWS_REGION` to None,
+  - Disable anonymous mode by default.
+
+### Fixed
+- Fix the implementation of orthogonal guidance in GaussianFlow.
+- Fix a bug with guidance interval.
+- Fix `tools/train.py` crashing when using `--launcher slurm`.
+- Fix a bug in `tools/test.py` that caused the flag `--reuse-viz` to have no effect.
+- Fix a bug when running `tools/cache_image_prompt_data.py` with `--skip-existing` flag in distributed mode.
+- Fix several bugs that could cause distributed runs to hang due to I/O synchronization issues.
+- Fix a bug that visualization images may not be saved in certain file systems due to unsupported filenames.
+- Fix a version compatibility issue in the example GMDiT script in `configs/gmflow/README.md`.
+
 ## [0.1.1] - 2025-12-18
 
 ### Changed
