@@ -58,15 +58,17 @@ work_dir = f'work_dirs/{name}'
 train_cfg = dict(
     gm_dropout=0.05,
     num_intermediate_states=2,
-    teacher_guidance_scale=2.8,
+    teacher_test_cfg=dict(
+        guidance_scale=2.8,
+        guidance_interval=[0, 0.7],
+        orthogonal_guidance=False,
+    ),
     nfe=2,
     total_substeps=128,
     diffusion_grad_clip=50.0,
     diffusion_grad_clip_begin_iter=400,
 )
 test_cfg = dict(
-    guidance_interval=[0, 0.7],
-    orthogonal_guidance=False,
     nfe=2,
     total_substeps=128,
 )

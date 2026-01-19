@@ -374,6 +374,10 @@ def main():
                             encoder_hidden_states_fp8, encoder_hidden_states_scale = to_scaled_fp8(v[batch_id])
                             cached_data['prompt_embed_kwargs']['encoder_hidden_states'] = encoder_hidden_states_fp8.cpu()
                             cached_data['prompt_embed_kwargs']['encoder_hidden_states_scale'] = encoder_hidden_states_scale.cpu()
+                        elif k == 'cap_feats':
+                            cap_feats_fp8, cap_feats_scale = to_scaled_fp8(v[batch_id])
+                            cached_data['prompt_embed_kwargs']['cap_feats'] = cap_feats_fp8.cpu()
+                            cached_data['prompt_embed_kwargs']['cap_feats_scale'] = cap_feats_scale.cpu()
                         else:
                             cached_data['prompt_embed_kwargs'][k] = v[batch_id].cpu()
                     if 'latents' in outputs_dict:

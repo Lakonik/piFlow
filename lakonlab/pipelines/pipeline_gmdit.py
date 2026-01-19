@@ -57,13 +57,16 @@ class GMDiTPipeline(DiTPipeline, GMFlowMixin):
         latent_size = self.transformer.config.sample_size
         latent_channels = self.transformer.config.in_channels
 
-        use_guidance = guidance_scale > 0.0
-
         x_t = randn_tensor(
             shape=(batch_size, latent_channels, latent_size, latent_size),
             generator=generator,
             device=self._execution_device,
         )
+        use_guidance = guidance_scale > 0.0
+        if use_guidance:
+            guidance_scale = x_t.new_tensor(
+                [guidance_scale]
+            ).expand(batch_size).reshape([batch_size] + [1] * (x_t.dim() - 1))
 
         class_labels = torch.tensor(class_labels, device=self._execution_device).reshape(-1)
         class_null = torch.tensor([1000] * batch_size, device=self._execution_device)

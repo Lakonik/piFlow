@@ -11,6 +11,8 @@ try:
     from torch.distributed.fsdp import FSDPModule
 except:
     pass
+from collections.abc import Mapping, Sequence
+from typing import Any, Optional
 from functools import partial
 from six.moves import map, zip
 from mmcv.parallel import is_module_wrapper
@@ -259,3 +261,26 @@ def gc_context(enable=False):
             gc.enable()
         else:
             gc.disable()
+
+
+def first_tensor_device(x: Any) -> Optional[torch.device]:
+    """
+    Walk a nested structure (dict/list/tuple/etc.) and return the device of the
+    first torch.Tensor found, or None if no tensor exists.
+    """
+    if isinstance(x, torch.Tensor):
+        return x.device
+
+    if isinstance(x, Mapping):
+        for v in x.values():
+            d = first_tensor_device(v)
+            if d is not None:
+                return d
+
+    elif isinstance(x, Sequence) and not isinstance(x, (str, bytes, bytearray)):
+        for v in x:
+            d = first_tensor_device(v)
+            if d is not None:
+                return d
+
+    return None

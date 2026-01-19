@@ -19,7 +19,7 @@ from lakonlab.ops.gmflow_ops.gmflow_ops import (
 
 @torch.jit.script
 def probabilistic_guidance_jit(
-        cond_mean, total_var, uncond_mean, guidance_scale: float,
+        cond_mean, total_var, uncond_mean, guidance_scale,
         orthogonal: float = 1.0, orthogonal_axis: Optional[torch.Tensor] = None):
     dim = list(range(1, cond_mean.dim()))
     bias = cond_mean - uncond_mean
@@ -483,8 +483,12 @@ class GMFlow(GaussianFlow, GMFlowMixin):
         self.intermediate_gm_x_0 = []
         self.intermediate_gm_trans = []
         self.intermediate_t = []
-        use_guidance = 0.0 < guidance_scale < 1.0
         assert order in [1, 2]
+        use_guidance = 0.0 < guidance_scale < 1.0
+        if use_guidance:
+            guidance_scale = x_t.new_tensor(  # to tensor
+                [guidance_scale]
+            ).expand(num_batches).reshape([num_batches] + [1] * (x_t.dim() - 1))
 
         if show_pbar:
             pbar = mmcv.ProgressBar(num_timesteps)
@@ -502,20 +506,18 @@ class GMFlow(GaussianFlow, GMFlowMixin):
             x_t_input = x_t
             _kwargs = kwargs
             if use_guidance:
-                guidance_active = guidance_interval[0] <= t <= guidance_interval[1]
-                if guidance_active:
-                    x_t_input = torch.cat([x_t_input, x_t_input], dim=0)
-                else:
-                    _kwargs = {
-                        k: v[num_batches:] if isinstance(v, torch.Tensor) and v.size(0) == 2 * num_batches else v
-                        for k, v in kwargs.items()}
+                x_t_input = torch.cat([x_t_input, x_t_input], dim=0)
 
             gm_output = self.pred(x_t_input, t, **_kwargs)
             assert isinstance(gm_output, dict)
             gm_output = self.u_to_x_0(gm_output, x_t_input, t)
 
             # ========== Probabilistic CFG ==========
-            if use_guidance and guidance_active:
+            if use_guidance:
+                _guidance_scale = guidance_scale
+                guidance_active = guidance_interval[0] <= t <= guidance_interval[1]
+                if not guidance_active:
+                    _guidance_scale = torch.zeros_like(_guidance_scale)
                 gm_cond = {k: v[num_batches:] for k, v in gm_output.items()}
                 gm_uncond = {k: v[:num_batches] for k, v in gm_output.items()}
                 uncond_mean = gm_to_mean(gm_uncond)
@@ -525,7 +527,7 @@ class GMFlow(GaussianFlow, GMFlowMixin):
                 else:
                     gaussian_cond['var'] = gaussian_cond['var'].mean(dim=(-2, -1), keepdim=True)  # exclude channel dim
                 gaussian_output, cfg_bias, avg_var = probabilistic_guidance_jit(
-                    gaussian_cond['mean'], gaussian_cond['var'], uncond_mean, guidance_scale,
+                    gaussian_cond['mean'], gaussian_cond['var'], uncond_mean, _guidance_scale,
                     orthogonal=orthogonal_guidance)
                 gm_output = gm_mul_iso_gaussian(
                     gm_cond, iso_gaussian_mul_iso_gaussian(gaussian_output, gaussian_cond, 1, -1),
@@ -586,25 +588,30 @@ class GMFlow(GaussianFlow, GMFlowMixin):
 
         return x_t.to(ori_dtype)
 
-    def forward_u(self, x_t, t, guidance_scale=0.0, test_cfg_override=dict(), **kwargs):
+    def forward_u(self, x_t, t, guidance_scale=0.0, test_cfg=dict(), **kwargs):
         ori_dtype = x_t.dtype
         x_t = x_t.float()
+        num_batches = x_t.size(0)
         ndim = x_t.dim()
         assert ndim in [4, 5], f'Invalid x_t shape: {x_t.shape}. Expected 4D or 5D tensor.'
         if ndim == 5:  # (bs, c, t, h, w)
             x_t = x_t.permute(0, 2, 1, 3, 4)  # (bs, t, c, h, w)
 
-        cfg = deepcopy(self.test_cfg)
-        cfg.update(test_cfg_override)
-
-        orthogonal_guidance = cfg.get('orthogonal_guidance', 1.0)
-        guidance_interval = cfg.get('guidance_interval', [0, self.num_timesteps])
+        orthogonal_guidance = test_cfg.get('orthogonal_guidance', 1.0)
+        guidance_interval = test_cfg.get('guidance_interval', [0, self.num_timesteps])
 
         use_guidance = 0.0 < guidance_scale < 1.0
 
         x_t_input = x_t
         t_input = t
         if use_guidance:
+            guidance_scale = x_t.new_tensor(
+                [guidance_scale]
+            ).expand(num_batches).reshape([num_batches] + [1] * (x_t.dim() - 1))
+            guidance_active = ((t >= guidance_interval[0]) & (t <= guidance_interval[1])).reshape_as(
+                guidance_scale)
+            guidance_scale = guidance_scale * guidance_active.float()
+
             x_t_input = torch.cat([x_t_input, x_t_input], dim=0)
             t_input = torch.cat([t_input, t_input], dim=0)
 
@@ -613,7 +620,6 @@ class GMFlow(GaussianFlow, GMFlowMixin):
 
         # ========== Probabilistic CFG ==========
         if use_guidance:
-            num_batches = x_t.size(0)
             gm_cond = {k: v[num_batches:] for k, v in gm_output.items()}
             gm_uncond = {k: v[:num_batches] for k, v in gm_output.items()}
             uncond_mean = gm_to_mean(gm_uncond)
@@ -629,10 +635,6 @@ class GMFlow(GaussianFlow, GMFlowMixin):
             gm_output = gm_mul_iso_gaussian(
                 gm_cond, iso_gaussian_mul_iso_gaussian(gaussian_output, gaussian_cond, 1, -1),
                 1, 1)[0]
-            if guidance_interval[0] > 0 or guidance_interval[1] < self.num_timesteps:
-                guidance_active = ((t >= guidance_interval[0]) & (t <= guidance_interval[1])).reshape(
-                    [num_batches] + [1] * ndim)
-                gm_output = {k: torch.where(guidance_active, v, gm_cond[k]) for k, v in gm_output.items()}
 
         u = gm_to_mean(gm_output)
 

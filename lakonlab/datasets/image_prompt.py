@@ -355,6 +355,13 @@ class ImagePrompt(Dataset):
                 encoder_hidden_states = encoder_hidden_states * encoder_hidden_states_scale
             prompt_embed_kwargs['encoder_hidden_states'] = self.pad_prompt_embeds(encoder_hidden_states)
 
+        cap_feats_scale = prompt_embed_kwargs.pop('cap_feats_scale', None)
+        if 'cap_feats' in prompt_embed_kwargs:
+            cap_feats = prompt_embed_kwargs['cap_feats'].float()
+            if cap_feats_scale is not None:
+                cap_feats = cap_feats * cap_feats_scale
+            prompt_embed_kwargs['cap_feats'] = DC(cap_feats)  # no stacking/padding for cap_feats
+
         if 'pooled_projections' in prompt_embed_kwargs:
             prompt_embed_kwargs['pooled_projections'] = prompt_embed_kwargs['pooled_projections'].float()
 

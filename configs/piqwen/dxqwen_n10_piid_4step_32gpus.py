@@ -88,7 +88,7 @@ work_dir = f'work_dirs/{name}'
 train_cfg = dict(
     window_substeps=3,
     num_intermediate_states=2,
-    teacher_guidance_scale=4.0,
+    teacher_test_cfg=dict(guidance_scale=4.0),
     nfe=4,
     final_step_size_scale=0.5,
     total_substeps=128,

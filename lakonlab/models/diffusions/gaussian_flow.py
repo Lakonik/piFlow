@@ -7,6 +7,7 @@ import torch.nn as nn
 import mmcv
 import diffusers
 
+from typing import Optional
 from copy import deepcopy
 from mmcv.runner.fp16_utils import force_fp32
 from mmgen.models.architectures.common import get_module_device
@@ -16,13 +17,19 @@ from . import schedulers
 
 
 @torch.jit.script
-def guidance_jit(pos_mean, neg_mean, guidance_scale: float, orthogonal: bool = False):
+def guidance_jit(
+        pos_mean, neg_mean, guidance_scale,
+        orthogonal: float = 1.0, orthogonal_axis: Optional[torch.Tensor] = None):
     bias = (pos_mean - neg_mean) * (guidance_scale - 1)
     if orthogonal:
         dim = list(range(1, pos_mean.dim()))
-        bias = bias - (bias * pos_mean).mean(
+        if orthogonal_axis is None:
+            orthogonal_axis = pos_mean
+        bias = bias - ((bias * orthogonal_axis).mean(
             dim=dim, keepdim=True
-        ) / (pos_mean * pos_mean).mean(dim=dim, keepdim=True).clamp(min=1e-6) * pos_mean
+        ) / (orthogonal_axis * orthogonal_axis).mean(
+            dim=dim, keepdim=True
+        ).clamp(min=1e-6) * orthogonal_axis).mul(orthogonal)
     return bias
 
 
@@ -86,6 +93,18 @@ class GaussianFlow(nn.Module):
         std = t.reshape(*t.size(), *((x_0.dim() - t.dim()) * [1])) / self.num_timesteps
         mean = 1 - std
         return x_0 * mean + noise * std, mean, std
+
+    def u_to_x_0(self, denoising_output, x_t, t=None, sigma=None):
+        if sigma is None:
+            if not isinstance(t, torch.Tensor):
+                t = torch.tensor(t, device=x_t.device)
+            t = t.reshape(*t.size(), *((x_t.dim() - t.dim()) * [1]))
+            sigma = t / self.num_timesteps
+        else:
+            assert sigma.dim() == x_t.dim()
+
+        x_0 = x_t - sigma * denoising_output
+        return x_0
 
     def pred(self, x_t=None, t=None, **kwargs):
         ori_dtype = x_t.dtype
@@ -178,8 +197,12 @@ class GaussianFlow(nn.Module):
 
         num_timesteps = cfg.get('num_timesteps', self.num_timesteps)
         guidance_interval = cfg.get('guidance_interval', [0, self.num_timesteps])
-        orthogonal_guidance = cfg.get('orthogonal_guidance', False)
+        orthogonal_guidance = cfg.get('orthogonal_guidance', 0.0)
         use_guidance = guidance_scale > 1.0
+        if use_guidance:
+            guidance_scale = x_t.new_tensor(  # to tensor
+                [guidance_scale]
+            ).expand(num_batches).reshape([num_batches] + [1] * (x_t.dim() - 1))
 
         set_timesteps_signatures = inspect.signature(sampler.set_timesteps).parameters.keys()
         if 'seq_len' in set_timesteps_signatures:
@@ -197,19 +220,19 @@ class GaussianFlow(nn.Module):
             x_t_input = x_t
             _kwargs = kwargs
             if use_guidance:
-                guidance_active = guidance_interval[0] <= t <= guidance_interval[1]
-                if guidance_active:
-                    x_t_input = torch.cat([x_t_input, x_t_input], dim=0)
-                else:
-                    _kwargs = {
-                        k: v[num_batches:] if isinstance(v, torch.Tensor) and v.size(0) == 2 * num_batches else v
-                        for k, v in kwargs.items()}
+                x_t_input = torch.cat([x_t_input, x_t_input], dim=0)
 
             denoising_output = self.pred(x_t_input, t, **_kwargs)
 
-            if use_guidance and guidance_active:
+            if use_guidance:
+                _guidance_scale = guidance_scale
+                guidance_active = guidance_interval[0] <= t <= guidance_interval[1]
+                if not guidance_active:
+                    _guidance_scale = torch.ones_like(_guidance_scale)
                 mean_neg, mean_pos = denoising_output.chunk(2, dim=0)
-                bias = guidance_jit(mean_pos, mean_neg, guidance_scale, orthogonal_guidance)
+                bias = guidance_jit(
+                    mean_pos, mean_neg, _guidance_scale,
+                    orthogonal_guidance, self.u_to_x_0(mean_pos, x_t, t))
                 denoising_output = mean_pos + bias
 
             x_t = sampler.step(denoising_output, t, x_t, return_dict=False)[0]
@@ -221,22 +244,30 @@ class GaussianFlow(nn.Module):
 
         return x_t.to(ori_dtype)
 
-    def forward_u(self, x_t=None, t=None, guidance_scale=1.0, test_cfg_override=dict(), **kwargs):
+    def forward_u(self, x_t=None, t=None, guidance_scale=1.0, test_cfg=dict(), **kwargs):
         ori_dtype = x_t.dtype
         x_t = x_t.float()
         num_batches = x_t.size(0)
 
-        cfg = deepcopy(self.test_cfg)
-        cfg.update(test_cfg_override)
-
-        orthogonal_guidance = cfg.get('orthogonal_guidance', False)
-        guidance_interval = cfg.get('guidance_interval', [0, self.num_timesteps])
+        orthogonal_guidance = test_cfg.get('orthogonal_guidance', 0.0)
+        guidance_interval = test_cfg.get('guidance_interval', [0, self.num_timesteps])
 
         use_guidance = guidance_scale > 1.0
 
         x_t_input = x_t
         t_input = t
         if use_guidance:
+            guidance_scale = x_t.new_tensor(
+                [guidance_scale]
+            ).expand(num_batches).reshape([num_batches] + [1] * (x_t.dim() - 1))
+            guidance_active = ((t >= guidance_interval[0]) & (t <= guidance_interval[1])).reshape_as(
+                guidance_scale)
+            guidance_scale = torch.where(
+                guidance_active,
+                guidance_scale,
+                torch.ones_like(guidance_scale)
+            )
+
             x_t_input = torch.cat([x_t_input, x_t_input], dim=0)
             t_input = torch.cat([t_input, t_input], dim=0)
 
@@ -244,11 +275,9 @@ class GaussianFlow(nn.Module):
 
         if use_guidance:
             mean_neg, mean_pos = denoising_output.chunk(2, dim=0)
-            bias = guidance_jit(mean_pos, mean_neg, guidance_scale, orthogonal_guidance)
-            if guidance_interval[0] > 0 or guidance_interval[1] < self.num_timesteps:
-                guidance_active = ((t >= guidance_interval[0]) & (t <= guidance_interval[1])).reshape(
-                    [num_batches] + [1] * (bias.dim() - 1))
-                bias = bias.masked_fill(~guidance_active, 0.0)
+            bias = guidance_jit(
+                mean_pos, mean_neg, guidance_scale,
+                orthogonal_guidance, self.u_to_x_0(mean_pos, x_t, t))
             denoising_output = mean_pos + bias
 
         return denoising_output.to(ori_dtype)

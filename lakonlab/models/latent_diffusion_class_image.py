@@ -20,7 +20,7 @@ class LatentDiffusionClassImage(BaseDiffusion):
         super().__init__(*args, **kwargs)
         self.vae = build_module(vae) if vae is not None else None
 
-    def _prepare_train_minibatch_args(self, data, running_status=None):
+    def _prepare_train_minibatch_base_args(self, data):
         if 'latents' in data:
             latents = data['latents']
         elif 'images' in data:
@@ -36,7 +36,7 @@ class LatentDiffusionClassImage(BaseDiffusion):
         labels = data['labels']
         bs = labels.size(0)
 
-        diffusion_args = (self.patchify(latents), )
+        args = (self.patchify(latents), )
 
         prob_class = self.train_cfg.get('prob_class', 1.0)
         if prob_class < 1.0:
@@ -44,22 +44,37 @@ class LatentDiffusionClassImage(BaseDiffusion):
                 torch.rand_like(labels, dtype=torch.float32) < prob_class,
                 labels, data['negative_labels'])
 
-        diffusion_kwargs = dict(class_labels=labels)
+        cond_kwargs = dict(class_labels=labels)
+
+        return args, cond_kwargs, bs
+
+    @staticmethod
+    def _prepare_train_minibatch_test_kwargs(data, test_cfg):
+        guidance_scale = test_cfg.get('guidance_scale', None)
+        use_guidance = (guidance_scale is not None
+                        and guidance_scale != 0.0 and guidance_scale != 1.0)
+
+        labels = data['labels']
+        if use_guidance:
+            test_kwargs = dict(class_labels=torch.cat([data['negative_labels'], labels], dim=0))
+            test_kwargs.update(guidance_scale=guidance_scale)
+        else:
+            test_kwargs = dict(class_labels=labels)
+
+        test_kwargs.update(test_cfg=test_cfg)
+
+        return test_kwargs
+
+    def _prepare_train_minibatch_args(self, data, running_status=None):
+        diffusion_args, diffusion_kwargs, bs = self._prepare_train_minibatch_base_args(data)
 
         parameters = inspect.signature(rgetattr(self.diffusion, 'forward_train')).parameters
-
         if 'running_status' in parameters:
             diffusion_kwargs['running_status'] = running_status
 
         if 'teacher' in parameters and 'teacher_kwargs' in parameters and self.teacher is not None:
-            teacher_guidance_scale = self.train_cfg.get('teacher_guidance_scale', None)
-            teacher_use_guidance = (teacher_guidance_scale is not None
-                                    and teacher_guidance_scale != 0.0 and teacher_guidance_scale != 1.0)
-            if teacher_use_guidance:
-                teacher_kwargs = dict(class_labels=torch.cat([data['negative_labels'], labels], dim=0))
-                teacher_kwargs.update(guidance_scale=teacher_guidance_scale)
-            else:
-                teacher_kwargs = dict(class_labels=labels)
+            teacher_kwargs = self._prepare_train_minibatch_test_kwargs(
+                data, self.train_cfg.get('teacher_test_cfg', dict()))
 
             diffusion_kwargs.update(
                 teacher=self.teacher,

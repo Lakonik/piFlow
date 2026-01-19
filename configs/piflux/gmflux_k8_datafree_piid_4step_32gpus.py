@@ -94,7 +94,7 @@ train_cfg = dict(
     gm_dropout=0.1,
     num_intermediate_states=4,
     distilled_guidance_scale=3.5,
-    teacher_distilled_guidance_scale=3.5,
+    teacher_test_cfg=dict(distilled_guidance_scale=3.5),
     nfe=4,
     final_step_size_scale=0.5,
     total_substeps=128,
