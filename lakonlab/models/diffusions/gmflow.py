@@ -331,7 +331,7 @@ class GMFlowMixin:
 
 
 @MODULES.register_module()
-class GMFlow(GaussianFlow, GMFlowMixin):
+class GMFlow(GMFlowMixin, GaussianFlow):
 
     def __init__(
             self,
