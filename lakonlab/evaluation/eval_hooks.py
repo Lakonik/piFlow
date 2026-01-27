@@ -264,6 +264,8 @@ class GenerativeEvalHook(_GenerativeEvalHook):
             if not self.every_n_iters(runner, interval):
                 return
 
+            torch.cuda.empty_cache()
+
             runner.model.eval()
             rank, ws = get_dist_info()
 
