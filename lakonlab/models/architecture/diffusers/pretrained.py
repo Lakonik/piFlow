@@ -274,7 +274,7 @@ class PretrainedQwenImageTextEncoder(nn.Module):
                  eval_mode=True,
                  torch_dtype='bfloat16',
                  max_sequence_length=512,
-                 pad_seq_len=None,
+                 pad_seq_len=512,
                  **kwargs):
         super().__init__()
         self.max_sequence_length = max_sequence_length
