@@ -211,7 +211,7 @@ class PiFlowImitationBase(GaussianFlow):
         cfg = deepcopy(self.test_cfg)
         cfg.update(test_cfg_override)
 
-        total_substeps = cfg.get('total_substeps', self.num_timesteps)
+        total_substeps = cfg.get('total_substeps', 128)
         eps = cfg.get('eps', 1e-4)
         nfe = cfg['nfe']
 
