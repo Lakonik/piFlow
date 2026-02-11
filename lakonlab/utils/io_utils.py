@@ -31,6 +31,7 @@ AWS_REGION = os.getenv('AWS_REGION')
 AWS_ACCESS_KEY_ID = os.getenv('AWS_ACCESS_KEY_ID')
 AWS_SECRET_ACCESS_KEY = os.getenv('AWS_SECRET_ACCESS_KEY')
 AWS_SESSION_TOKEN = os.getenv('AWS_SESSION_TOKEN')
+AWS_PROFILE = os.getenv('AWS_PROFILE')
 S3_MULTIPART_THRESHOLD = 5 * 2**30  # 5GB
 
 TMP_DIR = '/dev/shm' if os.path.isdir('/dev/shm') else tempfile.gettempdir()
@@ -129,14 +130,26 @@ class S3Backend(BaseStorageBackend):
     def __init__(self, anonymous: bool = False):
         if anonymous:
             config = Config(region_name=AWS_REGION, signature_version=UNSIGNED)
+            self._client = boto3.client(
+                's3',
+                config=config)
         else:
             config = Config(region_name=AWS_REGION)
-        self._client = boto3.client(
-            's3',
-            aws_access_key_id=AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
-            aws_session_token=AWS_SESSION_TOKEN,
-            config=config)
+            if AWS_PROFILE:
+                session = boto3.Session(profile_name=AWS_PROFILE)
+                self._client = session.client(
+                    's3',
+                    aws_access_key_id=AWS_ACCESS_KEY_ID,
+                    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+                    aws_session_token=AWS_SESSION_TOKEN,
+                    config=config)
+            else:
+                self._client = boto3.client(
+                    's3',
+                    aws_access_key_id=AWS_ACCESS_KEY_ID,
+                    aws_secret_access_key=AWS_SECRET_ACCESS_KEY,
+                    aws_session_token=AWS_SESSION_TOKEN,
+                    config=config)
 
     def __del__(self):
         self._client.close()
