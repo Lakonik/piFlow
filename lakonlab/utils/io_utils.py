@@ -301,7 +301,13 @@ class S3Backend(BaseStorageBackend):
         else:
             prefix_len = 0
 
-        out = subprocess.check_output(cmd, text=True)
+        p = subprocess.run(cmd, text=True, capture_output=True)
+        if p.returncode == 0:
+            out = p.stdout
+        elif not p.stdout and not p.stderr:  # dir_path does not exist
+            out = ''
+        else:
+            raise subprocess.CalledProcessError(p.returncode, p.args, output=p.stdout, stderr=p.stderr)
 
         names = []
         for line in out.splitlines():
