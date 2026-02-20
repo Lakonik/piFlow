@@ -309,6 +309,16 @@ def load_from_local(filename, map_location=None):
     return ckpt
 
 
+def shallow_copy_tree(x):
+    if isinstance(x, dict):
+        return {k: shallow_copy_tree(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [shallow_copy_tree(v) for v in x]
+    if isinstance(x, tuple):
+        return tuple(shallow_copy_tree(v) for v in x)
+    return x
+
+
 _checkpoint_cache = dict()
 
 
@@ -316,11 +326,11 @@ def _load_cached_checkpoint(filename, map_location=None, logger=None):
     cache_key = f'{filename}_{map_location}'
 
     if cache_key in _checkpoint_cache:
-        return _checkpoint_cache[cache_key]
+        return shallow_copy_tree(_checkpoint_cache[cache_key])
 
     checkpoint = _load_checkpoint(filename, map_location, logger)
     _checkpoint_cache[cache_key] = checkpoint
-    return checkpoint
+    return shallow_copy_tree(checkpoint)
 
 
 def load_checkpoint(model: torch.nn.Module,
