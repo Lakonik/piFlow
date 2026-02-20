@@ -23,3 +23,4 @@ build/
 /dev/
 *.pyi
 !/data/imagenet/imagenet1000_clsidx_to_labels.txt
+*.env
