@@ -19,7 +19,7 @@ import os.path as osp
 import platform
 import time
 import warnings
-
+import re
 import cv2
 import mmcv
 import torch
@@ -27,15 +27,16 @@ import torch
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
+from copy import deepcopy
 from mmcv import Config, DictAction
 from mmcv.runner import get_dist_info, init_dist
 from mmcv.utils import get_git_hash
-
 from mmgen.apis import set_random_seed
 from mmgen.datasets import build_dataset
 from mmgen.models import build_model
 from mmgen.utils import collect_env, get_root_logger
 
+from lakonlab.datasets import build_dataloader
 from lakonlab.apis import train_model
 from lakonlab.runner.checkpoint import clear_checkpoint_cache
 from lakonlab import __version__
@@ -227,22 +228,66 @@ def main():
     meta['seed'] = args.seed
     meta['exp_name'] = osp.basename(args.config)
 
-    model = build_model(
-        cfg.model, train_cfg=cfg.train_cfg, test_cfg=cfg.test_cfg)
-    clear_checkpoint_cache()
-
+    # build datasets and dataloaders before building the model
     datasets = [build_dataset(cfg.data.train)]
     if len(cfg.workflow) == 2:
         val_dataset = copy.deepcopy(cfg.data.val)
         val_dataset.pipeline = cfg.data.val.pipeline
         datasets.append(build_dataset(val_dataset))
+
+    # default loader config
+    loader_cfg = dict(
+        # cfg.gpus will be ignored if distributed
+        num_gpus=len(cfg.gpu_ids),
+        seed=cfg.seed)
+
+    # The overall dataloader settings
+    loader_cfg.update({
+        k: v
+        for k, v in cfg.data.items()
+        if k not in [
+            'train', 'train_dataloader', 'val_dataloader', 'test_dataloader'
+        ] and not re.fullmatch(r'(val|test)\d*', k)
+    })
+
+    # The specific datalaoder settings
+    train_loader_cfg = {**loader_cfg, **cfg.data.get('train_dataloader', {})}
+
+    data_loaders = [build_dataloader(ds, **train_loader_cfg) for ds in datasets]
+
+    if not args.no_validate and cfg.get('evaluation', None) is not None:
+        assert isinstance(cfg.evaluation, list)
+        _evaluation = []
+        for eval_cfg_ in cfg.evaluation:
+            val_dataset = build_dataset(cfg.data[eval_cfg_.data])
+            val_loader_cfg = {
+                **loader_cfg, 'shuffle': False,
+                **cfg.data.get('val_dataloader', {})
+            }
+            val_dataloader = build_dataloader(val_dataset, **val_loader_cfg)
+            eval_cfg = deepcopy(eval_cfg_)
+            eval_cfg.update(dict(dist=distributed, dataloader=val_dataloader))
+            _evaluation.append(eval_cfg)
+        cfg.evaluation = _evaluation
+
+    # warm up dataloader workers
+    for data_loader in data_loaders + [eval_cfg.dataloader for eval_cfg in cfg.evaluation]:
+        if (getattr(data_loader, 'num_workers', 0) > 0
+                and getattr(data_loader, 'persistent_workers', False)):
+            _ = iter(data_loader)  # spawns workers early, no data consumed
+
+    # build the model after building the dataloaders
+    model = build_model(
+        cfg.model, train_cfg=cfg.train_cfg, test_cfg=cfg.test_cfg)
+    clear_checkpoint_cache()
+
     if cfg.checkpoint_config is not None:
         # save lakonlab version, config file content and class names in checkpoints as meta data
         cfg.checkpoint_config.meta = dict(lakonlab_version=__version__ + get_git_hash()[:7])
 
     train_model(
         model,
-        datasets,
+        data_loaders,
         cfg,
         distributed=distributed,
         validate=(not args.no_validate),

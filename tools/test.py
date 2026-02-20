@@ -24,6 +24,7 @@ import torch.distributed as dist
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
 
+from copy import deepcopy
 from mmcv import Config, DictAction
 from mmcv.parallel import MMDataParallel
 from mmcv.runner import get_dist_info, init_dist, load_checkpoint
@@ -207,6 +208,45 @@ def main():
             deterministic=args.deterministic,
             use_rank_shift=args.diff_seed)
 
+    # build datasets and dataloaders before building the model
+    # The default loader config
+    loader_cfg = dict(
+        workers_per_gpu=cfg.data.get('val_workers_per_gpu', cfg.data.workers_per_gpu),
+        num_gpus=len(cfg.gpu_ids),
+        shuffle=False)
+
+    # The overall dataloader settings
+    loader_cfg.update({
+        k: v
+        for k, v in cfg.data.items()
+        if k not in [
+            'train', 'train_dataloader', 'val_dataloader', 'test_dataloader'
+        ] and not re.fullmatch(r'(val|test)\d*', k)
+    })
+
+    # The specific datalaoder settings
+    _evaluation = []
+    for eval_cfg_ in cfg.evaluation:
+        if args.data is not None:
+            if eval_cfg_.data not in args.data:
+                continue
+        test_dataset = build_dataset(cfg.data[eval_cfg_.data])
+        test_loader_cfg = {
+            **loader_cfg,
+            **cfg.data.get('test_dataloader', {})
+        }
+        test_data_loader = build_dataloader(test_dataset, **test_loader_cfg)
+        eval_cfg = deepcopy(eval_cfg_)
+        eval_cfg.update(dataloader=test_data_loader)
+        _evaluation.append(eval_cfg)
+    cfg.evaluation = _evaluation
+
+    # warm up dataloader workers
+    for data_loader in [eval_cfg.dataloader for eval_cfg in cfg.evaluation]:
+        if (getattr(data_loader, 'num_workers', 0) > 0
+                and getattr(data_loader, 'persistent_workers', False)):
+            _ = iter(data_loader)  # spawns workers early, no data consumed
+
     # build the model and load checkpoint
     model = build_model(
         cfg.model, train_cfg=cfg.train_cfg, test_cfg=cfg.test_cfg)
@@ -227,10 +267,6 @@ def main():
         load_checkpoint(model, cfg.load_from, map_location='cpu')
 
     for eval_cfg in cfg.evaluation:
-        if args.data is not None:
-            if eval_cfg.data not in args.data:
-                continue
-
         viz_dir = eval_cfg.get('viz_dir', None)
         if viz_dir is not None:
             if ckpt_name is not None:
@@ -257,28 +293,6 @@ def main():
                     f'We only support {_distributed_metrics} for multi gpu '
                     f'evaluation, but receive {metric.name}.')
 
-        # build the dataloader
-        dataset = build_dataset(cfg.data[eval_cfg.data])
-
-        # The default loader config
-        loader_cfg = dict(
-            workers_per_gpu=cfg.data.get('val_workers_per_gpu', cfg.data.workers_per_gpu),
-            num_gpus=len(cfg.gpu_ids),
-            shuffle=False)
-        # The overall dataloader settings
-        loader_cfg.update({
-            k: v
-            for k, v in cfg.data.items()
-            if k not in [
-                'train', 'train_dataloader', 'val_dataloader', 'test_dataloader'
-            ] and not re.fullmatch(r'(val|test)\d*', k)
-        })
-
-        # specific config for test loader
-        test_loader_cfg = {**loader_cfg, **cfg.data.get('test_dataloader', {})}
-
-        data_loader = build_dataloader(dataset, **test_loader_cfg)
-
         if args.seed is not None:
             logger.info(f'Set random seed to {args.seed}, '
                         f'deterministic: {args.deterministic}, '
@@ -289,7 +303,7 @@ def main():
                 use_rank_shift=args.diff_seed)
 
         log_vars = evaluate(
-            model, data_loader, metrics=metrics,
+            model, eval_cfg.dataloader, metrics=metrics,
             feed_batch_size=eval_cfg.get('feed_batch_size', 32),
             viz_dir=viz_dir,
             viz_num=eval_cfg.get('viz_num', None),

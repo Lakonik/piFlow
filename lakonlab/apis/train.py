@@ -1,53 +1,24 @@
 # Modified from https://github.com/open-mmlab/mmgeneration
 
-import warnings
-import re
-from copy import deepcopy
-
 from mmcv.parallel import MMDataParallel
 from mmcv.runner import HOOKS, IterBasedRunner, OptimizerHook, build_runner
 from mmcv.utils import build_from_cfg
 
-from mmgen.datasets import build_dataset
 from mmgen.utils import get_root_logger
 
 from lakonlab.parallel import apply_module_wrapper
 from lakonlab.runner.optimizer import build_optimizers
 from lakonlab.runner.checkpoint import exists_ckpt
-from lakonlab.datasets import build_dataloader
 
 
 def train_model(model,
-                dataset,
+                data_loaders,
                 cfg,
                 distributed=False,
                 validate=False,
                 timestamp=None,
                 meta=None):
     logger = get_root_logger(cfg.log_level)
-
-    # prepare data loaders
-    dataset = dataset if isinstance(dataset, (list, tuple)) else [dataset]
-
-    # default loader config
-    loader_cfg = dict(
-        # cfg.gpus will be ignored if distributed
-        num_gpus=len(cfg.gpu_ids),
-        seed=cfg.seed)
-
-    # The overall dataloader settings
-    loader_cfg.update({
-        k: v
-        for k, v in cfg.data.items()
-        if k not in [
-            'train', 'train_dataloader', 'val_dataloader', 'test_dataloader'
-        ] and not re.fullmatch(r'(val|test)\d*', k)
-    })
-
-    # The specific datalaoder settings
-    train_loader_cfg = {**loader_cfg, **cfg.data.get('train_dataloader', {})}
-
-    data_loaders = [build_dataloader(ds, **train_loader_cfg) for ds in dataset]
 
     if cfg.get('apex_amp', None):
         raise NotImplementedError('Apex AMP is no longer supported.')
@@ -115,26 +86,10 @@ def train_model(model,
                                    cfg.checkpoint_config, cfg.log_config,
                                    cfg.get('momentum_config', None))
 
-    # # DistSamplerSeedHook should be used with EpochBasedRunner
-    # if distributed:
-    #     runner.register_hook(DistSamplerSeedHook())
-
-    # In general, we do NOT adopt standard evaluation hook in GAN training.
-    # Thus, if you want a eval hook, you need further define the key of
-    # 'evaluation' in the config.
-    # register eval hooks
     if validate and cfg.get('evaluation', None) is not None:
         assert isinstance(cfg.evaluation, list)
-        for eval_cfg_ in cfg.evaluation:
-            val_dataset = build_dataset(cfg.data[eval_cfg_.data])
-            val_loader_cfg = {
-                **loader_cfg, 'shuffle': False,
-                **cfg.data.get('val_dataloader', {})
-            }
-            val_dataloader = build_dataloader(val_dataset, **val_loader_cfg)
-            eval_cfg = deepcopy(eval_cfg_)
+        for eval_cfg in cfg.evaluation:
             priority = eval_cfg.pop('priority', 'LOW')
-            eval_cfg.update(dict(dist=distributed, dataloader=val_dataloader))
             eval_hook = build_from_cfg(eval_cfg, HOOKS)
             runner.register_hook(eval_hook, priority=priority)
 
