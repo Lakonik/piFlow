@@ -37,7 +37,10 @@ def fsdp_load_full_state_dict(module: FSDP,
     flat_p = module._flat_param
     if flat_p is not None:
         for param_info, shape, shard_info in zip(flat_p._param_infos, flat_p._shapes, flat_p._shard_param_infos):
-            k = f'{prefix}{param_info.module_name}.{param_info.param_name}'
+            if param_info.module_name:
+                k = f'{prefix}{param_info.module_name}.{param_info.param_name}'
+            else:
+                k = f'{prefix}{param_info.param_name}'
             if k not in full_sd:
                 fsdp_missing_keys.append(k)
                 continue
@@ -416,7 +419,7 @@ def get_state_dict(module,
                    trainable_only=False,
                    cpu_offload=True):
     if isinstance(module, FSDP):  # FSDP1
-        if trainable_only and len(module.params) == 1 and not module.params[0].requires_grad:
+        if trainable_only and all(not param.requires_grad for param in module.parameters()):
             return destination  # skip frozen module
 
         with FSDP.state_dict_type(
